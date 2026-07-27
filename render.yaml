@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ikart
+    env: python
+    buildCommand: ./build.sh
+    startCommand: gunicorn ikart.wsgi:application
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: DATABASE_URL
+        sync: false
+      - key: CLOUDINARY_URL
+        sync: false
