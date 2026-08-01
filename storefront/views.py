@@ -1,22 +1,32 @@
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+from difflib import get_close_matches
+import hashlib
+import json
+from uuid import uuid4
 
+import razorpay
 from django.contrib import messages
+from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth import login
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import User
-from django.contrib.auth.decorators import login_required
+from django.conf import settings
 from django.core.mail import send_mail
-from django.db import transaction
-from django.db.models import Q
-from django.http import Http404
+from django.core.paginator import Paginator
+from django.db import IntegrityError, transaction
+from django.db.models import Avg, Count, DecimalField, ExpressionWrapper, F, Q, Sum
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from .cart import Cart
-from .forms import CheckoutForm, OTPVerificationForm, ReviewForm, SignUpForm
-from .models import Category, Order, OrderItem, Product, Review
+from .forms import AddressForm, CheckoutForm, MarketingPreferenceForm, OrderRequestForm, OTPVerificationForm, ProductQuestionForm, ReviewForm, SignUpForm, SupportTicketForm
+from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductQuestion, ProductVariant, ProductView, Review, SavedForLaterItem, Shipment, SupportTicket, WishlistItem
+from .services import calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, restore_order_inventory
 
 
 def home(request):
@@ -27,26 +37,70 @@ def home(request):
 
 
 def product_list(request, category_slug=None):
-    products = Product.objects.filter(is_active=True).select_related("category").prefetch_related("images")
+    products = Product.objects.filter(is_active=True).select_related("category").prefetch_related("images").annotate(
+        rating_value=Avg("reviews__rating", filter=Q(reviews__is_approved=True)), review_count=Count("reviews", filter=Q(reviews__is_approved=True)),
+    )
     category = None
     if category_slug:
         category = get_object_or_404(Category, slug=category_slug)
         products = products.filter(Q(category=category) | Q(category__parent=category))
     query = request.GET.get("q", "").strip()
+    typo_suggestions = []
     if query:
-        products = products.filter(Q(name__icontains=query) | Q(description__icontains=query))
-    if request.GET.get("min_price"):
-        products = products.filter(price__gte=request.GET["min_price"])
-    if request.GET.get("max_price"):
-        products = products.filter(price__lte=request.GET["max_price"])
+        searched_products = products.filter(Q(name__icontains=query) | Q(description__icontains=query) | Q(brand__icontains=query))
+        if not searched_products.exists():
+            names = list(Product.objects.filter(is_active=True).values_list("name", flat=True))
+            typo_suggestions = get_close_matches(query, names, n=3, cutoff=0.55)
+            if typo_suggestions:
+                searched_products = products.filter(name__in=typo_suggestions)
+        products = searched_products
+    for parameter, lookup in (("min_price", "price__gte"), ("max_price", "price__lte")):
+        raw_value = request.GET.get(parameter, "").strip()
+        if raw_value:
+            try:
+                value = Decimal(raw_value)
+                if value >= 0:
+                    products = products.filter(**{lookup: value})
+            except (InvalidOperation, ValueError):
+                pass
+    brand = request.GET.get("brand", "").strip()
+    if brand:
+        products = products.filter(brand__iexact=brand)
+    try:
+        rating_min = Decimal(request.GET.get("rating", ""))
+        if Decimal("0") <= rating_min <= Decimal("5"):
+            products = products.filter(rating_value__gte=rating_min)
+    except (InvalidOperation, ValueError):
+        pass
+    if request.GET.get("discount"):
+        products = products.filter(compare_at_price__gt=F("price"))
     ordering = request.GET.get("sort", "newest")
-    products = products.order_by({"price_low": "price", "price_high": "-price", "newest": "-created_at", "popular": "-is_featured"}.get(ordering, "-created_at"))
-    return render(request, "storefront/product_list.html", {"products": products, "categories": Category.objects.filter(parent__isnull=True), "current_category": category})
+    products = products.order_by({"price_low": "price", "price_high": "-price", "newest": "-created_at", "popular": "-review_count", "rating": "-rating_value"}.get(ordering, "-created_at"))
+    brands = Product.objects.filter(is_active=True).exclude(brand="").values_list("brand", flat=True).distinct().order_by("brand")
+    paginator = Paginator(products, 24)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    return render(request, "storefront/product_list.html", {"products": page_obj, "page_obj": page_obj, "categories": Category.objects.filter(parent__isnull=True), "current_category": category, "brands": brands, "typo_suggestions": typo_suggestions})
+
+
+def search_autocomplete(request):
+    query = request.GET.get("q", "").strip()
+    if len(query) < 2:
+        return JsonResponse({"results": []})
+    matches = Product.objects.filter(is_active=True).filter(Q(name__icontains=query) | Q(brand__icontains=query)).values("name", "slug", "price")[:8]
+    return JsonResponse({"results": list(matches)})
 
 
 def product_detail(request, slug):
     product = get_object_or_404(Product.objects.prefetch_related("images", "variants", "reviews__user"), slug=slug, is_active=True)
-    return render(request, "storefront/product_detail.html", {"product": product, "review_form": ReviewForm()})
+    if not request.session.session_key:
+        request.session.create()
+    ProductView.objects.create(product=product, user=request.user if request.user.is_authenticated else None, session_key=request.session.session_key)
+    is_wishlisted = request.user.is_authenticated and WishlistItem.objects.filter(user=request.user, product=product).exists()
+    return render(request, "storefront/product_detail.html", {
+        "product": product, "review_form": ReviewForm(), "question_form": ProductQuestionForm(),
+        "is_wishlisted": is_wishlisted, "frequently_bought": frequently_bought_together(product),
+        "also_viewed": customers_also_viewed(product),
+    })
 
 
 @require_POST
@@ -55,27 +109,92 @@ def add_to_cart(request, product_id):
     variant_id = request.POST.get("variant")
     variant = product.variants.filter(id=variant_id).first() if variant_id else None
     available = variant.stock if variant else product.stock
-    quantity = max(1, int(request.POST.get("quantity", 1)))
-    if available < quantity:
+    try:
+        quantity = int(request.POST.get("quantity", 1))
+    except (TypeError, ValueError):
+        quantity = 0
+    if quantity < 1:
+        messages.error(request, "Choose a valid quantity.")
+        return redirect(product.get_absolute_url())
+    cart = Cart(request)
+    key = f"{product.id}:{variant.id if variant else 0}"
+    current_quantity = cart.data.get(key, {}).get("quantity", 0)
+    if available < current_quantity + quantity:
         messages.error(request, "That quantity is not currently in stock.")
         return redirect(product.get_absolute_url())
-    Cart(request).add(product, quantity, variant)
+    cart.add(product, quantity, variant)
     messages.success(request, f"{product.name} was added to your cart.")
     return redirect(request.POST.get("next") or "storefront:cart")
 
 
 def cart_detail(request):
-    return render(request, "storefront/cart.html", {"cart": Cart(request)})
+    cart = Cart(request)
+    quote = calculate_cart_quote(cart, request.user, coupon_code=cart.coupon_code)
+    return render(request, "storefront/cart.html", {"cart": cart, "quote": quote})
+
+
+def _update_cart_item(cart, key, raw_quantity):
+    try:
+        quantity = int(raw_quantity)
+    except (TypeError, ValueError):
+        return "Enter a whole number for quantity."
+    if key not in cart.data:
+        return "This cart item no longer exists."
+    if quantity < 0:
+        return "Quantity cannot be negative."
+    if quantity == 0:
+        cart.remove(key)
+        return ""
+    item = cart.data[key]
+    product = Product.objects.filter(id=item["product_id"], is_active=True).first()
+    variant = ProductVariant.objects.filter(id=item["variant_id"], product=product).first() if item["variant_id"] and product else None
+    if item["variant_id"] and not variant:
+        return "This product option is no longer available."
+    available = variant.stock if variant else (product.stock if product else 0)
+    if not product or quantity > available:
+        return "Requested quantity is no longer in stock."
+    cart.update(key, quantity)
+    return ""
 
 
 @require_POST
 def update_cart(request):
     cart = Cart(request)
+    errors = []
     for key, quantity in request.POST.items():
         if key.startswith("qty_"):
-            cart.update(key[4:], quantity)
-    messages.success(request, "Your cart has been updated.")
+            error = _update_cart_item(cart, key[4:], quantity)
+            if error:
+                errors.append(error)
+    if errors:
+        messages.error(request, errors[0])
+    else:
+        messages.success(request, "Your cart has been updated.")
     return redirect("storefront:cart")
+
+
+@require_POST
+def update_cart_quote(request):
+    cart = Cart(request)
+    error = _update_cart_item(cart, request.POST.get("key", ""), request.POST.get("quantity", ""))
+    if error:
+        return JsonResponse({"ok": False, "error": error}, status=400)
+    quote = calculate_cart_quote(cart, request.user, request.POST.get("delivery_option", Order.DeliveryOption.STANDARD), cart.coupon_code)
+    if quote.coupon_error and cart.coupon_code:
+        cart.set_coupon("")
+    return JsonResponse({"ok": True, **quote.as_dict(), "cart_count": cart.count})
+
+
+@require_POST
+def update_coupon_quote(request):
+    cart = Cart(request)
+    code = request.POST.get("coupon_code", "").strip().upper()
+    quote = calculate_cart_quote(cart, request.user, request.POST.get("delivery_option", Order.DeliveryOption.STANDARD), code)
+    if quote.coupon_error:
+        cart.set_coupon("")
+        return JsonResponse({"ok": False, **quote.as_dict()}, status=400)
+    cart.set_coupon(quote.coupon.code if quote.coupon else "")
+    return JsonResponse({"ok": True, **quote.as_dict()})
 
 
 @require_POST
@@ -84,47 +203,450 @@ def remove_from_cart(request, key):
     return redirect("storefront:cart")
 
 
+@login_required
+def wishlist(request):
+    items = request.user.wishlist_items.select_related("product").prefetch_related("product__images")
+    return render(request, "storefront/wishlist.html", {"items": items})
+
+
+@login_required
+@require_POST
+def toggle_wishlist(request, product_id):
+    product = get_object_or_404(Product, id=product_id, is_active=True)
+    item = WishlistItem.objects.filter(user=request.user, product=product).first()
+    if item:
+        item.delete()
+        messages.info(request, f"{product.name} was removed from your wishlist.")
+    else:
+        WishlistItem.objects.create(user=request.user, product=product)
+        messages.success(request, f"{product.name} was saved to your wishlist.")
+    return redirect(request.POST.get("next") or product.get_absolute_url())
+
+
+@login_required
+@require_POST
+def save_cart_item_for_later(request, key):
+    cart = Cart(request)
+    item = cart.data.get(key)
+    if not item:
+        raise Http404
+    product = get_object_or_404(Product, id=item["product_id"])
+    variant = ProductVariant.objects.filter(id=item["variant_id"]).first() if item["variant_id"] else None
+    saved = SavedForLaterItem.objects.filter(user=request.user, product=product, variant=variant).first()
+    if saved:
+        saved.quantity += item["quantity"]
+        saved.save(update_fields=["quantity"])
+    else:
+        SavedForLaterItem.objects.create(user=request.user, product=product, variant=variant, quantity=item["quantity"])
+    cart.remove(key)
+    messages.success(request, "Item saved for later.")
+    return redirect("storefront:cart")
+
+
+@login_required
+def saved_for_later(request):
+    items = request.user.saved_for_later_items.select_related("product", "variant").prefetch_related("product__images")
+    return render(request, "storefront/saved_for_later.html", {"items": items})
+
+
+@login_required
+@require_POST
+def move_saved_item_to_cart(request, item_id):
+    item = get_object_or_404(SavedForLaterItem, id=item_id, user=request.user)
+    available = item.variant.stock if item.variant else item.product.stock
+    if not available:
+        messages.error(request, "This item is currently out of stock.")
+    else:
+        Cart(request).add(item.product, min(item.quantity, available), item.variant)
+        item.delete()
+        messages.success(request, "Item moved to your cart.")
+    return redirect("storefront:saved_for_later")
+
+
+@login_required
+@require_POST
+def remove_saved_item(request, item_id):
+    get_object_or_404(SavedForLaterItem, id=item_id, user=request.user).delete()
+    return redirect("storefront:saved_for_later")
+
+
+@login_required
+def addresses(request):
+    form = AddressForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        address = form.save(commit=False)
+        address.user = request.user
+        if address.is_default:
+            request.user.addresses.update(is_default=False)
+        address.save()
+        messages.success(request, "Address saved.")
+        return redirect("storefront:addresses")
+    return render(request, "storefront/addresses.html", {"addresses": request.user.addresses.order_by("-is_default", "-id"), "form": form})
+
+
+@login_required
+def edit_address(request, address_id):
+    address = get_object_or_404(Address, id=address_id, user=request.user)
+    form = AddressForm(request.POST or None, instance=address)
+    if request.method == "POST" and form.is_valid():
+        address = form.save(commit=False)
+        if address.is_default:
+            request.user.addresses.exclude(id=address.id).update(is_default=False)
+        address.save()
+        messages.success(request, "Address updated.")
+        return redirect("storefront:addresses")
+    return render(request, "storefront/address_form.html", {"form": form, "address": address})
+
+
+@login_required
+@require_POST
+def delete_address(request, address_id):
+    get_object_or_404(Address, id=address_id, user=request.user).delete()
+    messages.info(request, "Address deleted.")
+    return redirect("storefront:addresses")
+
+
+def _new_checkout_token(request):
+    token = uuid4()
+    request.session["checkout_token"] = str(token)
+    return token
+
+
+def _remember_order(request, number):
+    orders = request.session.get("recent_order_numbers", [])
+    request.session["recent_order_numbers"] = [number, *[item for item in orders if item != number]][:10]
+
+
+def _can_access_order(request, order):
+    return (order.user and request.user.is_authenticated and order.user == request.user) or order.number in request.session.get("recent_order_numbers", [])
+
+
+def _razorpay_client():
+    if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
+        return None
+    return razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+
+
+def _create_order_from_cart(form, cart, quote, checkout_token, payment_pending=False):
+    """Create one local order from a server-side quote and reserve stock atomically."""
+    with transaction.atomic():
+        coupon = None
+        if quote.coupon:
+            coupon = Coupon.objects.select_for_update().get(pk=quote.coupon.pk)
+            valid, error = coupon.is_valid_for(quote.subtotal, form.user if getattr(form.user, "is_authenticated", False) else None)
+            if not valid:
+                raise ValueError(error)
+            quote = calculate_cart_quote(cart, form.user, form.cleaned_data["delivery_option"], coupon.code)
+            if quote.coupon_error:
+                raise ValueError(quote.coupon_error)
+        order = form.save(commit=False)
+        order.user = form.user if getattr(form.user, "is_authenticated", False) else None
+        order.checkout_token = checkout_token
+        order.subtotal = quote.subtotal
+        order.delivery_fee = quote.delivery_fee
+        order.tax_amount = quote.tax_amount
+        order.coupon = coupon
+        order.coupon_code = coupon.code if coupon else ""
+        order.discount_amount = quote.discount_amount
+        order.total = quote.total
+        order.status = Order.Status.PAYMENT_PENDING if payment_pending else Order.Status.PLACED
+        order.payment_status = "initiated" if payment_pending else "pending"
+        order.save()
+        for item in cart:
+            OrderItem.objects.create(
+                order=order, product=item["product"], variant=item["variant"], product_name=item["product"].name,
+                variant_label=item["variant"].label if item["variant"] else "", quantity=item["quantity"], unit_price=item["price"],
+            )
+        order = deduct_order_inventory(order)
+        if coupon:
+            CouponRedemption.objects.create(coupon=coupon, order=order, user=order.user, discount_amount=quote.discount_amount)
+        return order
+
+
 def checkout(request):
     cart = Cart(request)
     if not cart.count:
         messages.info(request, "Your cart is empty.")
         return redirect("storefront:product_list")
-    delivery_fee = Decimal("0") if cart.subtotal >= 499 else Decimal("49")
+    session_token = request.session.get("checkout_token")
+    checkout_token = session_token or _new_checkout_token(request)
     if request.method == "POST":
-        form = CheckoutForm(request.POST)
+        form = CheckoutForm(request.POST, user=request.user)
         if form.is_valid():
-            if form.cleaned_data["delivery_option"] == Order.DeliveryOption.EXPRESS:
-                delivery_fee = Decimal("99")
-            # Razorpay is deliberately gated until server-side payment verification is configured.
-            if form.cleaned_data["payment_method"] == Order.PaymentMethod.RAZORPAY:
-                messages.error(request, "Online payment is not configured yet. Please choose cash on delivery.")
+            token = form.cleaned_data["checkout_token"]
+            if str(token) != request.session.get("checkout_token"):
+                form.add_error(None, "This checkout has expired. Please review your cart and try again.")
+                return render(request, "storefront/checkout.html", {"cart": cart, "form": form, "quote": calculate_cart_quote(cart, request.user, form.cleaned_data["delivery_option"], form.cleaned_data["coupon_code"])})
+            existing_order = Order.objects.filter(checkout_token=token).first()
+            if existing_order:
+                _remember_order(request, existing_order.number)
+                payment = getattr(existing_order, "payment_transaction", None)
+                if payment and payment.status == PaymentTransaction.Status.CREATED:
+                    return redirect("storefront:payment_checkout", number=existing_order.number)
+                return redirect("storefront:order_confirmation", number=existing_order.number)
+            coupon_code = form.cleaned_data["coupon_code"].strip().upper() or cart.coupon_code
+            quote = calculate_cart_quote(cart, request.user, form.cleaned_data["delivery_option"], coupon_code)
+            if quote.coupon_error:
+                form.add_error("coupon_code", quote.coupon_error)
+            elif form.cleaned_data["payment_method"] == Order.PaymentMethod.RAZORPAY and not _razorpay_client():
+                form.add_error("payment_method", "Online payments are temporarily unavailable. Please choose cash on delivery.")
             else:
-                with transaction.atomic():
-                    order = form.save(commit=False)
-                    order.user = request.user if request.user.is_authenticated else None
-                    order.subtotal = cart.subtotal
-                    order.delivery_fee = delivery_fee
-                    order.total = cart.subtotal + delivery_fee
-                    order.save()
-                    for item in cart:
-                        available = item["variant"].stock if item["variant"] else item["product"].stock
-                        if item["quantity"] > available:
-                            raise Http404("An item in your cart is no longer available in that quantity.")
-                        OrderItem.objects.create(order=order, product=item["product"], product_name=item["product"].name,
-                            variant_label=item["variant"].label if item["variant"] else "", quantity=item["quantity"], unit_price=item["price"])
-                        if item["variant"]:
-                            item["variant"].stock -= item["quantity"]
-                            item["variant"].save(update_fields=["stock"])
-                        else:
-                            item["product"].stock -= item["quantity"]
-                            item["product"].save(update_fields=["stock"])
-                    cart.clear()
-                send_mail(f"Order {order.number} confirmed", f"Thanks for your order. Total: ₹{order.total}", None, [order.email], fail_silently=True)
-                request.session["recent_order_numbers"] = [order.number]
-                return redirect("storefront:order_confirmation", number=order.number)
+                try:
+                    is_online = form.cleaned_data["payment_method"] == Order.PaymentMethod.RAZORPAY
+                    order = _create_order_from_cart(form, cart, quote, token, payment_pending=is_online)
+                except ValueError as error:
+                    form.add_error(None, str(error))
+                else:
+                    _remember_order(request, order.number)
+                    if not is_online:
+                        cart.clear()
+                        request.session.pop("checkout_token", None)
+                        notify_order_email(order, "order_placed", f"Order {order.number} confirmed", f"Thanks for your order. Total: ₹{order.total}")
+                        return redirect("storefront:order_confirmation", number=order.number)
+                    try:
+                        provider_order = _razorpay_client().order.create({
+                            "amount": int(order.total * 100), "currency": settings.RAZORPAY_CURRENCY,
+                            "receipt": order.number, "notes": {"ikart_order": order.number},
+                        })
+                        PaymentTransaction.objects.create(order=order, provider_order_id=provider_order["id"], amount=order.total, currency=settings.RAZORPAY_CURRENCY)
+                    except Exception:
+                        with transaction.atomic():
+                            order = Order.objects.select_for_update().get(pk=order.pk)
+                            restore_order_inventory(order)
+                            CouponRedemption.objects.filter(order=order).delete()
+                            order.status = Order.Status.PAYMENT_FAILED
+                            order.payment_status = "failed"
+                            order.save(update_fields=["status", "payment_status", "updated_at"])
+                        request.session.pop("checkout_token", None)
+                        form.add_error("payment_method", "Could not start the payment. No payment was taken; please try again.")
+                    else:
+                        return redirect("storefront:payment_checkout", number=order.number)
     else:
-        form = CheckoutForm(initial={"email": request.user.email} if request.user.is_authenticated else None)
-    return render(request, "storefront/checkout.html", {"cart": cart, "form": form, "delivery_fee": delivery_fee, "total": cart.subtotal + delivery_fee})
+        form = CheckoutForm(initial={"email": request.user.email, "coupon_code": cart.coupon_code, "checkout_token": checkout_token} if request.user.is_authenticated else {"coupon_code": cart.coupon_code, "checkout_token": checkout_token}, user=request.user)
+    quote = calculate_cart_quote(cart, request.user, form.data.get("delivery_option", Order.DeliveryOption.STANDARD) if form.is_bound else Order.DeliveryOption.STANDARD, form.data.get("coupon_code", cart.coupon_code) if form.is_bound else cart.coupon_code)
+    return render(request, "storefront/checkout.html", {"cart": cart, "form": form, "quote": quote})
+
+
+def payment_checkout(request, number):
+    order = get_object_or_404(Order, number=number)
+    if not _can_access_order(request, order):
+        raise Http404
+    payment = get_object_or_404(PaymentTransaction, order=order)
+    if payment.status == PaymentTransaction.Status.CAPTURED:
+        return redirect("storefront:order_confirmation", number=order.number)
+    if payment.status == PaymentTransaction.Status.AUTHORIZED:
+        messages.info(request, "Your payment is being confirmed. Please wait for the order status update.")
+        return redirect("storefront:order_confirmation", number=order.number)
+    if payment.status != PaymentTransaction.Status.CREATED:
+        messages.error(request, "This payment attempt is no longer active. Please place a new order.")
+        return redirect("storefront:cart")
+    return render(request, "storefront/payment_checkout.html", {"order": order, "payment": payment, "razorpay_key_id": settings.RAZORPAY_KEY_ID, "amount_paise": int(order.total * 100)})
+
+
+@require_POST
+def verify_razorpay_payment(request, number):
+    order = get_object_or_404(Order, number=number)
+    if not _can_access_order(request, order):
+        raise Http404
+    payment = get_object_or_404(PaymentTransaction, order=order)
+    if payment.status == PaymentTransaction.Status.CAPTURED:
+        return redirect("storefront:order_confirmation", number=order.number)
+    provider_order_id = request.POST.get("razorpay_order_id", "")
+    provider_payment_id = request.POST.get("razorpay_payment_id", "")
+    signature = request.POST.get("razorpay_signature", "")
+    if provider_order_id != payment.provider_order_id or not provider_payment_id or not signature:
+        fail_or_cancel_payment(payment, PaymentTransaction.Status.FAILED, {"reason": "invalid_callback"})
+        messages.error(request, "Payment verification failed. No order has been placed.")
+        return redirect("storefront:cart")
+    client = _razorpay_client()
+    if not client:
+        messages.error(request, "Online payment verification is unavailable. Please contact support with your order number.")
+        return redirect("storefront:order_confirmation", number=order.number)
+    try:
+        client.utility.verify_payment_signature({
+            "razorpay_order_id": payment.provider_order_id,
+            "razorpay_payment_id": provider_payment_id,
+            "razorpay_signature": signature,
+        })
+    except razorpay.errors.SignatureVerificationError:
+        fail_or_cancel_payment(payment, PaymentTransaction.Status.FAILED, {"reason": "invalid_signature"})
+        request.session.pop("checkout_token", None)
+        messages.error(request, "Payment verification failed. No payment was taken.")
+        return redirect("storefront:cart")
+    except Exception:
+        messages.error(request, "We could not verify this payment yet. Please wait for the order status update.")
+        return redirect("storefront:order_confirmation", number=order.number)
+    try:
+        provider_payment = client.payment.fetch(provider_payment_id)
+        expected_amount = int(payment.amount * 100)
+        if (
+            provider_payment.get("order_id") != payment.provider_order_id
+            or int(provider_payment.get("amount", 0)) != expected_amount
+            or provider_payment.get("currency") != payment.currency
+        ):
+            raise ValueError("Payment details did not match the order.")
+        if provider_payment.get("status") == "authorized":
+            provider_payment = client.payment.capture(provider_payment_id, int(payment.amount * 100), {"currency": payment.currency})
+    except ValueError as error:
+        fail_or_cancel_payment(payment, PaymentTransaction.Status.FAILED, {"reason": "payment_mismatch"})
+        request.session.pop("checkout_token", None)
+        messages.error(request, str(error))
+        return redirect("storefront:cart")
+    except Exception:
+        # A network/API failure after a valid signature is not proof of failure.
+        # Keep stock reserved and let Razorpay's signed webhook reconcile it.
+        with transaction.atomic():
+            payment = PaymentTransaction.objects.select_for_update().get(pk=payment.pk)
+            if payment.status != PaymentTransaction.Status.CAPTURED:
+                payment.status = PaymentTransaction.Status.AUTHORIZED
+                payment.provider_payment_id = provider_payment_id
+                payment.save(update_fields=["status", "provider_payment_id", "updated_at"])
+        messages.info(request, "Your payment is being confirmed. We will update the order shortly.")
+        return redirect("storefront:order_confirmation", number=order.number)
+    if provider_payment.get("status") == "failed":
+        fail_or_cancel_payment(payment, PaymentTransaction.Status.FAILED, provider_payment)
+        request.session.pop("checkout_token", None)
+        messages.error(request, "Payment failed. Your cart is still available to try again.")
+        return redirect("storefront:cart")
+    if provider_payment.get("status") != "captured":
+        with transaction.atomic():
+            payment = PaymentTransaction.objects.select_for_update().get(pk=payment.pk)
+            if payment.status != PaymentTransaction.Status.CAPTURED:
+                payment.status = PaymentTransaction.Status.AUTHORIZED
+                payment.provider_payment_id = provider_payment_id
+                payment.provider_payload = provider_payment
+                payment.save(update_fields=["status", "provider_payment_id", "provider_payload", "updated_at"])
+        messages.info(request, "Your payment is authorised and awaiting capture. We will confirm it shortly.")
+        return redirect("storefront:order_confirmation", number=order.number)
+    order = mark_payment_captured(payment, provider_payment_id, provider_payment)
+    cart = Cart(request)
+    cart.clear()
+    request.session.pop("checkout_token", None)
+    _remember_order(request, order.number)
+    if order.payment_status == "paid":
+        notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", f"Your payment was successful. Total paid: ₹{order.total}")
+    else:
+        notify_order_email(order, "payment_review", f"Payment received for order {order.number}", "Your payment was received and is being reviewed because the item is no longer available.")
+    return redirect("storefront:order_confirmation", number=order.number)
+
+
+@require_POST
+def cancel_razorpay_payment(request, number):
+    order = get_object_or_404(Order, number=number)
+    if not _can_access_order(request, order):
+        raise Http404
+    payment = get_object_or_404(PaymentTransaction, order=order)
+    if payment.status == PaymentTransaction.Status.CAPTURED:
+        return redirect("storefront:order_confirmation", number=order.number)
+    fail_or_cancel_payment(payment, PaymentTransaction.Status.CANCELLED, {"reason": "customer_cancelled"})
+    request.session.pop("checkout_token", None)
+    messages.info(request, "Payment was cancelled and reserved stock was released.")
+    return redirect("storefront:cart")
+
+
+def _apply_refund_webhook(payment, refund, succeeded):
+    """Apply a signed Razorpay refund state without claiming a pending refund is final."""
+    with transaction.atomic():
+        payment = PaymentTransaction.objects.select_for_update().select_related("order").get(pk=payment.pk)
+        order = payment.order
+        if not succeeded and payment.status == PaymentTransaction.Status.REFUNDED:
+            return order
+        if refund.get("id"):
+            payment.provider_refund_id = refund["id"]
+        payment.provider_payload = {**payment.provider_payload, "refund": refund}
+        if succeeded:
+            payment.status = PaymentTransaction.Status.REFUNDED
+            payment.save(update_fields=["provider_refund_id", "status", "provider_payload", "updated_at"])
+            order.status = Order.Status.REFUNDED
+            order.payment_status = "refunded"
+            order.save(update_fields=["status", "payment_status", "updated_at"])
+            OrderRequest.objects.filter(
+                order=order,
+                status__in=[OrderRequest.Status.APPROVED, OrderRequest.Status.REFUND_PENDING],
+            ).update(status=OrderRequest.Status.REFUNDED)
+            restore_order_inventory(order)
+        else:
+            # A failed refund leaves the original payment captured so staff can
+            # safely retry it after resolving the provider-side issue.
+            payment.status = PaymentTransaction.Status.CAPTURED
+            payment.save(update_fields=["provider_refund_id", "status", "provider_payload", "updated_at"])
+            order.payment_status = "refund_failed"
+            order.save(update_fields=["payment_status", "updated_at"])
+        return order
+
+
+@csrf_exempt
+@require_POST
+def razorpay_webhook(request):
+    if not settings.RAZORPAY_WEBHOOK_SECRET:
+        return HttpResponse(status=400)
+    signature = request.headers.get("X-Razorpay-Signature", "")
+    client = _razorpay_client()
+    if not client:
+        return HttpResponse(status=400)
+    try:
+        client.utility.verify_webhook_signature(request.body.decode("utf-8"), signature, settings.RAZORPAY_WEBHOOK_SECRET)
+        payload = json.loads(request.body)
+    except Exception:
+        return HttpResponse(status=400)
+    event_id = request.headers.get("X-Razorpay-Event-Id") or hashlib.sha256(request.body).hexdigest()
+    event = payload.get("event", "")
+    try:
+        with transaction.atomic():
+            webhook_event = PaymentWebhookEvent.objects.create(event_id=event_id, event_type=event, payload=payload)
+    except IntegrityError:
+        return HttpResponse(status=200)
+    payload_entities = payload.get("payload", {})
+    entity = payload_entities.get("payment", {}).get("entity", {})
+    refund_entity = payload_entities.get("refund", {}).get("entity", {})
+    provider_order_id = entity.get("order_id") or payload.get("payload", {}).get("order", {}).get("entity", {}).get("id")
+    payment = PaymentTransaction.objects.filter(provider_order_id=provider_order_id).first()
+    if not payment and refund_entity.get("payment_id"):
+        payment = PaymentTransaction.objects.filter(provider_payment_id=refund_entity["payment_id"]).first()
+    if not payment:
+        return HttpResponse(status=200)
+    try:
+        if event in {"payment.captured", "order.paid"}:
+            if payment.status in {
+                PaymentTransaction.Status.CREATED,
+                PaymentTransaction.Status.AUTHORIZED,
+                PaymentTransaction.Status.FAILED,
+                PaymentTransaction.Status.CANCELLED,
+            }:
+                order = mark_payment_captured(payment, entity.get("id", ""), entity)
+                if order.payment_status == "paid":
+                    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", f"Your payment was successful. Total paid: ₹{order.total}")
+                else:
+                    notify_order_email(order, "payment_review", f"Payment received for order {order.number}", "Your payment was received and is being reviewed before fulfilment.")
+        elif event == "payment.failed" and payment.status in {PaymentTransaction.Status.CREATED, PaymentTransaction.Status.AUTHORIZED}:
+            order = fail_or_cancel_payment(payment, PaymentTransaction.Status.FAILED, entity)
+            notify_order_email(order, "payment_failed", f"Payment failed for order {order.number}", "Your payment failed and no order was placed. You can try checkout again.")
+        elif event.startswith("refund.") and (
+            refund_entity.get("payment_id") != payment.provider_payment_id
+            or int(refund_entity.get("amount", 0)) != int(payment.amount * 100)
+            or (refund_entity.get("currency") and refund_entity["currency"] != payment.currency)
+        ):
+            return HttpResponse(status=200)
+        elif event == "refund.created" and payment.status == PaymentTransaction.Status.CAPTURED:
+            with transaction.atomic():
+                payment = PaymentTransaction.objects.select_for_update().select_related("order").get(pk=payment.pk)
+                payment.status = PaymentTransaction.Status.REFUND_PENDING
+                payment.provider_refund_id = refund_entity.get("id") or payment.provider_refund_id
+                payment.provider_payload = {**payment.provider_payload, "refund": refund_entity}
+                payment.save(update_fields=["status", "provider_refund_id", "provider_payload", "updated_at"])
+                payment.order.payment_status = "refund_pending"
+                payment.order.save(update_fields=["payment_status", "updated_at"])
+        elif event == "refund.processed":
+            order = _apply_refund_webhook(payment, refund_entity, succeeded=True)
+            notify_order_email(order, "refund_processed", f"Order {order.number}: refund processed", "Your refund has been processed by the payment provider.")
+        elif event == "refund.failed":
+            order = _apply_refund_webhook(payment, refund_entity, succeeded=False)
+            notify_order_email(order, "refund_failed", f"Order {order.number}: refund needs attention", "Your refund could not be processed yet. Our support team will contact you.")
+    except Exception:
+        # Delete the idempotency marker so Razorpay can retry a transient failure.
+        webhook_event.delete()
+        return HttpResponse(status=500)
+    return HttpResponse(status=200)
 
 
 def order_confirmation(request, number):
@@ -132,19 +654,53 @@ def order_confirmation(request, number):
     can_view = (order.user and order.user == request.user) or number in request.session.get("recent_order_numbers", [])
     if not can_view:
         raise Http404
-    return render(request, "storefront/order_confirmation.html", {"order": order})
+    return render(request, "storefront/order_confirmation.html", {"order": order, "shipment": getattr(order, "shipment", None), "requests": order.requests.all() if can_view else []})
 
 
 @login_required
 def order_history(request):
-    return render(request, "storefront/order_history.html", {"orders": request.user.orders.prefetch_related("items")})
+    return render(request, "storefront/order_history.html", {"orders": request.user.orders.prefetch_related("items", "requests")})
+
+
+@login_required
+def request_order_change(request, number, request_type):
+    if request_type not in {OrderRequest.RequestType.CANCELLATION, OrderRequest.RequestType.RETURN}:
+        raise Http404
+    order = get_object_or_404(Order, number=number, user=request.user)
+    if request_type == OrderRequest.RequestType.CANCELLATION and order.status not in {Order.Status.PLACED, Order.Status.CANCELLATION_REQUESTED}:
+        messages.error(request, "This order can no longer be cancelled online.")
+        return redirect("storefront:order_confirmation", number=order.number)
+    if request_type == OrderRequest.RequestType.RETURN and order.status not in {Order.Status.DELIVERED, Order.Status.RETURN_REQUESTED}:
+        messages.error(request, "A return can be requested after delivery.")
+        return redirect("storefront:order_confirmation", number=order.number)
+    existing = order.requests.filter(request_type=request_type, status=OrderRequest.Status.REQUESTED).first()
+    if existing:
+        messages.info(request, "You already have a request in progress for this order.")
+        return redirect("storefront:order_confirmation", number=order.number)
+    form = OrderRequestForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        change_request = form.save(commit=False)
+        change_request.order = order
+        change_request.user = request.user
+        change_request.request_type = request_type
+        change_request.save()
+        order.status = Order.Status.CANCELLATION_REQUESTED if request_type == OrderRequest.RequestType.CANCELLATION else Order.Status.RETURN_REQUESTED
+        order.save(update_fields=["status", "updated_at"])
+        notify_order_email(order, f"{request_type}_requested", f"Order {order.number}: request received", f"We received your {request_type} request and will update you shortly.")
+        messages.success(request, "Your request has been submitted.")
+        return redirect("storefront:order_confirmation", number=order.number)
+    return render(request, "storefront/order_request.html", {"form": form, "order": order, "request_type": request_type})
 
 
 def signup(request):
     if request.method == "POST":
         form = SignUpForm(request.POST)
         if form.is_valid():
-            code_hash, expires_at = _send_verification_code(form.cleaned_data["email"])
+            try:
+                code_hash, expires_at = _send_verification_code(form.cleaned_data["email"])
+            except Exception:
+                form.add_error(None, "We could not send a verification email. Check the email settings and try again.")
+                return render(request, "registration/signup.html", {"form": form})
             request.session["pending_registration"] = {
                 "username": form.cleaned_data["username"],
                 "email": form.cleaned_data["email"],
@@ -152,6 +708,7 @@ def signup(request):
                 "code_hash": code_hash,
                 "expires_at": expires_at.isoformat(),
                 "attempts": 0,
+                "last_sent_at": timezone.now().isoformat(),
             }
             return redirect("storefront:verify_email")
     else:
@@ -211,8 +768,16 @@ def resend_verification_code(request):
     if not pending:
         messages.info(request, "Start by creating your account.")
         return redirect("storefront:signup")
-    code_hash, expires_at = _send_verification_code(pending["email"])
-    pending.update({"code_hash": code_hash, "expires_at": expires_at.isoformat(), "attempts": 0})
+    last_sent_at = pending.get("last_sent_at")
+    if last_sent_at and timezone.now() - datetime.fromisoformat(last_sent_at) < timedelta(seconds=60):
+        messages.info(request, "Please wait one minute before requesting another code.")
+        return redirect("storefront:verify_email")
+    try:
+        code_hash, expires_at = _send_verification_code(pending["email"])
+    except Exception:
+        messages.error(request, "We could not send a new verification email. Please try again shortly.")
+        return redirect("storefront:verify_email")
+    pending.update({"code_hash": code_hash, "expires_at": expires_at.isoformat(), "attempts": 0, "last_sent_at": timezone.now().isoformat()})
     request.session["pending_registration"] = pending
     messages.success(request, "A new verification code has been sent.")
     return redirect("storefront:verify_email")
@@ -226,7 +791,80 @@ def add_review(request, slug):
     if form.is_valid():
         Review.objects.update_or_create(product=product, user=request.user, defaults=form.cleaned_data)
         messages.success(request, "Thanks for reviewing this product.")
+    else:
+        messages.error(request, "Please provide a rating from 1 to 5 and complete the review fields.")
     return redirect(product.get_absolute_url())
+
+
+@login_required
+@require_POST
+def add_product_question(request, slug):
+    product = get_object_or_404(Product, slug=slug, is_active=True)
+    form = ProductQuestionForm(request.POST)
+    if form.is_valid():
+        question = " ".join(form.cleaned_data["question"].split())
+        recent_questions = ProductQuestion.objects.filter(
+            product=product, user=request.user, created_at__gte=timezone.now() - timedelta(hours=1),
+        )
+        if recent_questions.filter(question__iexact=question).exists():
+            messages.error(request, "You have already submitted that question.")
+        elif recent_questions.count() >= 3:
+            messages.error(request, "You can submit up to three questions per product each hour.")
+        else:
+            ProductQuestion.objects.create(product=product, user=request.user, question=question)
+            messages.success(request, "Your question was submitted for moderation. We will publish an answer as soon as possible.")
+    return redirect(product.get_absolute_url())
+
+
+@login_required
+def support_center(request):
+    form = SupportTicketForm(request.POST or None, user=request.user)
+    if request.method == "POST" and form.is_valid():
+        ticket = form.save(commit=False)
+        ticket.user = request.user
+        ticket.save()
+        messages.success(request, f"Support ticket #{ticket.id} was created.")
+        return redirect("storefront:support_ticket", ticket_id=ticket.id)
+    return render(request, "storefront/support.html", {
+        "faqs": FAQ.objects.filter(is_active=True), "tickets": request.user.support_tickets.all(), "form": form,
+    })
+
+
+@login_required
+def support_ticket(request, ticket_id):
+    ticket = get_object_or_404(SupportTicket.objects.prefetch_related("replies__author"), id=ticket_id, user=request.user)
+    return render(request, "storefront/support_ticket.html", {"ticket": ticket})
+
+
+@login_required
+def notification_preferences(request):
+    preference, _ = MarketingPreference.objects.get_or_create(user=request.user)
+    form = MarketingPreferenceForm(request.POST or None, instance=preference)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Notification preferences updated.")
+        return redirect("storefront:notification_preferences")
+    return render(request, "storefront/notification_preferences.html", {"form": form})
+
+
+@staff_member_required
+def analytics_dashboard(request):
+    completed_orders = Order.objects.filter(status__in=[Order.Status.PLACED, Order.Status.SHIPPED, Order.Status.DELIVERED])
+    totals = completed_orders.aggregate(revenue=Sum("total"), orders=Count("id"))
+    top_products = (
+        OrderItem.objects.filter(order__in=completed_orders)
+        .values("product_name")
+        .annotate(
+            units=Sum("quantity"),
+            revenue=Sum(ExpressionWrapper(F("unit_price") * F("quantity"), output_field=DecimalField(max_digits=12, decimal_places=2))),
+        )
+        .order_by("-units")[:8]
+    )
+    return render(request, "storefront/admin_analytics.html", {
+        "revenue": totals["revenue"] or Decimal("0"), "order_count": totals["orders"],
+        "top_products": top_products, "low_stock": Product.objects.filter(stock__lte=F("low_stock_threshold")).order_by("stock", "name"),
+        "open_requests": OrderRequest.objects.filter(status=OrderRequest.Status.REQUESTED).select_related("order", "user"),
+    })
 
 
 def trust_page(request, page):

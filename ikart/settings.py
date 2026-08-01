@@ -1,7 +1,9 @@
 import os
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 env = environ.Env(DEBUG=(bool, True))
@@ -10,6 +12,9 @@ environ.Env.read_env(BASE_DIR / ".env")
 SECRET_KEY = env("SECRET_KEY", default="change-this-local-development-key")
 DEBUG = env("DEBUG")
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
+
+if not DEBUG and SECRET_KEY == "change-this-local-development-key":
+    raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG=False.")
 
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
@@ -76,6 +81,13 @@ if env("CLOUDINARY_URL", default=""):
 # Keys are intentionally optional: checkout supports cash on delivery until a gateway is configured.
 RAZORPAY_KEY_ID = env("RAZORPAY_KEY_ID", default="")
 RAZORPAY_KEY_SECRET = env("RAZORPAY_KEY_SECRET", default="")
+RAZORPAY_WEBHOOK_SECRET = env("RAZORPAY_WEBHOOK_SECRET", default="")
+RAZORPAY_CURRENCY = env("RAZORPAY_CURRENCY", default="INR")
+PAYMENT_RESERVATION_MINUTES = env.int("PAYMENT_RESERVATION_MINUTES", default=30)
+try:
+    TAX_RATE = Decimal(env("TAX_RATE", default="0"))
+except InvalidOperation:
+    TAX_RATE = Decimal("0")
 
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

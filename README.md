@@ -13,7 +13,7 @@ IKart is a mobile-responsive, Django shopping website built as the Phase 1 found
 - Admin-managed products, multiple images, size/color variants, inventory, orders, and order-status updates.
 - Privacy, terms, return, and secure-checkout trust pages.
 
-Razorpay is represented as the online card/UPI option but intentionally cannot be selected until secure payment creation, signature verification, and webhooks are configured. Cash on delivery is the usable MVP payment path.
+Razorpay card/UPI checkout is implemented for test or live keys. The server creates the Razorpay order, verifies the checkout signature, checks/captures the payment server-side, and accepts signed webhooks as the final asynchronous reconciliation path. Cash on delivery remains available when Razorpay is not configured.
 
 ## Run locally
 
@@ -38,9 +38,38 @@ During local development, verification emails (including the one-time code) prin
 - `CLOUDINARY_URL`: Cloudinary environment URL for hosted catalog images.
 - `ALLOWED_HOSTS`: the Render hostname (and any custom domain).
 - `DEBUG=False`.
+- `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` to enable card/UPI payments.
+- SMTP sender values: `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL`.
 
 Render provides HTTPS. Use a real random `SECRET_KEY` in production. The application uses local SQLite/media during development, then automatically moves to Neon and Cloudinary once their environment variables are provided.
 
+## Razorpay test-mode setup
+
+1. In the Razorpay Dashboard, create or copy **Test Mode** API keys and set `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in `.env` (never commit them).
+2. Start the site and select **Card / UPI (Razorpay)** at checkout. Use Razorpay’s test payment methods; no real money is taken in test mode.
+3. Once the site has a public HTTPS URL, create a Razorpay webhook for `https://YOUR-DOMAIN/payments/razorpay/webhook/`, subscribe to `payment.captured`, `payment.failed`, `order.paid`, `refund.processed`, and `refund.failed`, then copy the webhook secret into `RAZORPAY_WEBHOOK_SECRET`.
+4. Configure Razorpay payment capture for the account. IKart also attempts to capture an authorised payment, while the signed webhook handles delayed confirmations and payment failures.
+
+The payment amount is created and checked on the server from the current cart quote; the browser only opens Razorpay Checkout and returns its signed result. A payment failure/cancellation restores inventory and leaves the customer’s cart available to retry.
+
+Run `.venv/bin/python manage.py release_stale_payment_reservations` every 15 minutes in production (or use the **Payment transactions** admin action) to release abandoned checkout reservations. Set `PAYMENT_RESERVATION_MINUTES` if the default 30-minute hold does not suit the store.
+
 ## Delivery roadmap
 
-Phase 1 is the implemented MVP. The next priority set is Phase 2: wishlists, coupons, richer search, returns/refunds, support, lifecycle notifications, CSV product import, and analytics. Phase 3 can then add personalization, deals, memberships, marketplace sellers, logistics, mobile apps, and multi-region support.
+## Phase 2 — Growth
+
+Phase 2 is implemented as an additive layer on the Phase 1 shopping loop:
+
+- Wishlists and save-for-later for signed-in customers.
+- Saved-address management and choosing a saved address at checkout.
+- Admin-managed coupon codes, including percentage/fixed discounts, dates, order thresholds, and usage limits.
+- Cancellation and return requests with customer reason codes, Admin approval/refund workflow, and order-status emails.
+- Product Q&A, support FAQs, customer support tickets, and Admin replies.
+- Behavioural recommendations based on product views and previous baskets.
+- Search autocomplete, close-match typo suggestions, and brand/rating/sale filters.
+- Shipment tracking records and event timeline, plus email notification logs.
+- Store analytics, low-stock visibility, and CSV product imports in Django Admin.
+
+Use **Admin → Products → Import CSV** for a product file with required columns `name`, `category`, `price`, `stock`, and `description`. Optional columns are `brand`, `short_description`, `compare_at_price`, `low_stock_threshold`, `is_featured`, and `is_active`.
+
+Order, shipping, return, and promotion emails use the SMTP setup described above. SMS preferences and notification logging are ready, but actual SMS delivery and carrier live-status synchronization each require a third-party provider/API and its credentials. Phase 3 can add the planned AI features after choosing an AI provider and configuring its API credentials.

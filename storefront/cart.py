@@ -7,6 +7,7 @@ class Cart:
     """Session-backed cart that works for guests and signed-in customers."""
 
     session_key = "cart"
+    coupon_session_key = "cart_coupon_code"
 
     def __init__(self, request):
         self.session = request.session
@@ -33,16 +34,30 @@ class Cart:
 
     def clear(self):
         self.session.pop(self.session_key, None)
+        self.session.pop(self.coupon_session_key, None)
+        self.session.modified = True
+
+    @property
+    def coupon_code(self):
+        return self.session.get(self.coupon_session_key, "")
+
+    def set_coupon(self, code):
+        if code:
+            self.session[self.coupon_session_key] = code.upper()
+        else:
+            self.session.pop(self.coupon_session_key, None)
         self.session.modified = True
 
     def __iter__(self):
-        products = Product.objects.in_bulk(item["product_id"] for item in self.data.values())
+        products = Product.objects.filter(is_active=True).in_bulk(item["product_id"] for item in self.data.values())
         variants = ProductVariant.objects.in_bulk([item["variant_id"] for item in self.data.values() if item["variant_id"]])
         for key, item in self.data.items():
             product = products.get(item["product_id"])
             if not product:
                 continue
             variant = variants.get(item["variant_id"])
+            if item["variant_id"] and (not variant or variant.product_id != product.id):
+                continue
             price = product.price + (variant.price_adjustment if variant else Decimal("0"))
             yield {"key": key, "product": product, "variant": variant, "quantity": item["quantity"], "price": price, "total": price * item["quantity"]}
 
@@ -52,7 +67,7 @@ class Cart:
 
     @property
     def count(self):
-        return sum(item["quantity"] for item in self.data.values())
+        return sum(item["quantity"] for item in self)
 
     def _save(self):
         self.session[self.session_key] = self.data
