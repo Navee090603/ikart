@@ -74,9 +74,19 @@ EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=10)
 
-# If CLOUDINARY_URL is present, product uploads use Cloudinary; local media remains useful in development.
-if env("CLOUDINARY_URL", default=""):
-    STORAGES["default"] = {"BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage"}
+# Cloudinary media storage
+CLOUDINARY_CLOUD_NAME = env("CLOUDINARY_CLOUD_NAME", default="")
+CLOUDINARY_API_KEY = env("CLOUDINARY_API_KEY", default="")
+CLOUDINARY_API_SECRET = env("CLOUDINARY_API_SECRET", default="")
+
+if all([CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET]):
+    STORAGES["default"] = {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+    }
+
+    CLOUDINARY_STORAGE = {
+        "PREFIX": "",
+    }
 
 # Keys are intentionally optional: checkout supports cash on delivery until a gateway is configured.
 RAZORPAY_KEY_ID = env("RAZORPAY_KEY_ID", default="")
