@@ -272,10 +272,10 @@ class NotificationLogAdmin(admin.ModelAdmin):
 
 @admin.register(PaymentTransaction)
 class PaymentTransactionAdmin(admin.ModelAdmin):
-    list_display = ("order", "provider", "provider_order_id", "provider_payment_id", "status", "amount", "updated_at")
+    list_display = ("order", "provider", "provider_order_id", "provider_payment_link_id", "provider_payment_id", "status", "amount", "updated_at")
     list_filter = ("provider", "status")
-    search_fields = ("order__number", "provider_order_id", "provider_payment_id", "provider_refund_id")
-    readonly_fields = ("order", "provider", "provider_order_id", "provider_payment_id", "provider_refund_id", "amount", "currency", "status", "inventory_released", "verified_at", "provider_payload", "created_at", "updated_at")
+    search_fields = ("order__number", "provider_order_id", "provider_payment_link_id", "provider_payment_id", "provider_refund_id")
+    readonly_fields = ("order", "provider", "provider_order_id", "provider_payment_link_id", "provider_payment_id", "provider_refund_id", "amount", "currency", "status", "inventory_released", "verified_at", "provider_payload", "created_at", "updated_at")
     actions = ("release_unpaid_reservations",)
 
     @admin.action(description="Release selected unpaid payment reservations")

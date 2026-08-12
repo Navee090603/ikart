@@ -85,6 +85,17 @@ class ShoppingFlowTests(TestCase):
         data.update(overrides)
         return data
 
+    @staticmethod
+    def payment_link_response(link_id="plink_test_123", order_id=None):
+        response = {
+            "id": link_id,
+            "short_url": f"https://rzp.io/i/{link_id}",
+            "status": "created",
+        }
+        if order_id:
+            response["order_id"] = order_id
+        return response
+
     def test_wishlist_and_save_for_later_are_persistent_for_customer(self):
         user = self.login_customer()
         self.client.post(reverse("storefront:toggle_wishlist", args=[self.product.id]))
@@ -155,38 +166,129 @@ class ShoppingFlowTests(TestCase):
         self.assertRedirects(response, reverse("storefront:order_confirmation", args=[order.number]))
         self.assertEqual(order.total, Decimal("318.10"))
 
+    def test_checkout_page_loads(self):
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
+        response = self.client.get(reverse("storefront:checkout"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Checkout")
+        self.assertIn("checkout_token", self.client.session)
+
     @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_CURRENCY="INR")
     @patch("storefront.views.razorpay.Client")
     def test_verified_online_payment_is_captured_once_and_clears_cart(self, client_class):
         fake_client = client_class.return_value
-        fake_client.order.create.return_value = {"id": "order_test_123"}
+        fake_client.payment_link.create.return_value = self.payment_link_response()
         fake_client.payment.fetch.return_value = {"id": "pay_test_123", "order_id": "order_test_123", "amount": 34800, "currency": "INR", "status": "captured"}
         self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
         response = self.client.post(reverse("storefront:checkout"), self.checkout_data(payment_method="razorpay"))
         order = Order.objects.get()
-        self.assertRedirects(response, reverse("storefront:payment_checkout", args=[order.number]))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "https://rzp.io/i/plink_test_123")
+        payment = PaymentTransaction.objects.get(order=order)
+        self.assertIsNone(payment.provider_order_id)
+        self.assertEqual(payment.provider_payment_link_id, "plink_test_123")
+        self.assertEqual(payment.provider_payload["payment_link_id"], "plink_test_123")
+        self.assertEqual(payment.provider_payload["payment_link_url"], "https://rzp.io/i/plink_test_123")
+        self.assertEqual(payment.status, PaymentTransaction.Status.CREATED)
+        self.assertEqual(order.payment_status, "initiated")
+        payment_page = self.client.get(reverse("storefront:payment_checkout", args=[order.number]))
+        self.assertContains(payment_page, "Cancel payment")
+        self.assertContains(payment_page, "https://rzp.io/i/plink_test_123")
         self.assertTrue(self.client.session.get("cart"))
         self.assertEqual(order.status, Order.Status.PAYMENT_PENDING)
-        response = self.client.post(reverse("storefront:verify_razorpay_payment", args=[order.number]), {
-            "razorpay_order_id": "order_test_123", "razorpay_payment_id": "pay_test_123", "razorpay_signature": "valid",
+        import hashlib
+        import hmac
+        signature_payload = f"plink_test_123|{order.number}|paid|pay_test_123"
+        signature = hmac.new(b"secret", signature_payload.encode(), hashlib.sha256).hexdigest()
+        response = self.client.get(reverse("storefront:razorpay_payment_link_callback", args=[order.number]), {
+            "razorpay_payment_link_id": "plink_test_123", "razorpay_payment_link_reference_id": order.number,
+            "razorpay_payment_link_status": "paid", "razorpay_payment_id": "pay_test_123", "razorpay_signature": signature,
         })
         self.assertRedirects(response, reverse("storefront:order_confirmation", args=[order.number]))
         order.refresh_from_db()
         self.assertEqual(order.payment_status, "paid")
         self.assertEqual(order.status, Order.Status.PLACED)
-        self.assertEqual(PaymentTransaction.objects.get(order=order).status, PaymentTransaction.Status.CAPTURED)
+        payment = PaymentTransaction.objects.get(order=order)
+        self.assertEqual(payment.status, PaymentTransaction.Status.CAPTURED)
+        self.assertEqual(payment.provider_order_id, "order_test_123")
         self.assertFalse(self.client.session.get("cart"))
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, 4)
-        self.client.post(reverse("storefront:verify_razorpay_payment", args=[order.number]), {
-            "razorpay_order_id": "order_test_123", "razorpay_payment_id": "pay_test_123", "razorpay_signature": "valid",
+        self.client.get(reverse("storefront:razorpay_payment_link_callback", args=[order.number]), {
+            "razorpay_payment_link_id": "plink_test_123", "razorpay_payment_link_reference_id": order.number,
+            "razorpay_payment_link_status": "paid", "razorpay_payment_id": "pay_test_123", "razorpay_signature": signature,
         })
         self.assertEqual(Order.objects.count(), 1)
 
     @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_CURRENCY="INR")
     @patch("storefront.views.razorpay.Client")
+    def test_payment_link_missing_required_fields_is_retryable(self, client_class):
+        fake_client = client_class.return_value
+        fake_client.payment_link.create.return_value = {"id": "plink_incomplete", "status": "created"}
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
+        response = self.client.post(reverse("storefront:checkout"), self.checkout_data(payment_method="razorpay"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Could not start the payment")
+        failed_order = Order.objects.get()
+        failed_order.refresh_from_db()
+        self.assertEqual(failed_order.status, Order.Status.PAYMENT_FAILED)
+        self.assertIsNone(failed_order.checkout_token)
+        self.assertFalse(PaymentTransaction.objects.exists())
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 5)
+        self.assertTrue(self.client.session.get("cart"))
+
+        fake_client.payment_link.create.return_value = self.payment_link_response("plink_retry")
+        retry_data = self.checkout_data(payment_method="razorpay", checkout_token=self.client.session["checkout_token"])
+        response = self.client.post(reverse("storefront:checkout"), retry_data)
+        retry_order = Order.objects.exclude(pk=failed_order.pk).get()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "https://rzp.io/i/plink_retry")
+        self.assertEqual(PaymentTransaction.objects.get(order=retry_order).provider_payment_link_id, "plink_retry")
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_CURRENCY="INR")
+    @patch("storefront.views.razorpay.Client")
+    def test_payment_link_api_failure_is_retryable(self, client_class):
+        fake_client = client_class.return_value
+        fake_client.payment_link.create.side_effect = Exception("gateway unavailable")
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
+        response = self.client.post(reverse("storefront:checkout"), self.checkout_data(payment_method="razorpay"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Could not start the payment")
+        failed_order = Order.objects.get()
+        self.assertEqual(failed_order.status, Order.Status.PAYMENT_FAILED)
+        self.assertFalse(PaymentTransaction.objects.exists())
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 5)
+
+        fake_client.payment_link.create.side_effect = None
+        fake_client.payment_link.create.return_value = self.payment_link_response("plink_retry_after_api_error")
+        retry_data = self.checkout_data(payment_method="razorpay", checkout_token=self.client.session["checkout_token"])
+        response = self.client.post(reverse("storefront:checkout"), retry_data)
+        retry_order = Order.objects.exclude(pk=failed_order.pk).get()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "https://rzp.io/i/plink_retry_after_api_error")
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_CURRENCY="INR")
+    @patch("storefront.views.razorpay.Client")
+    def test_checkout_failure_diagnostic_does_not_cancel_payment(self, client_class):
+        client_class.return_value.payment_link.create.return_value = self.payment_link_response("plink_test_diagnostic", "order_test_diagnostic")
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
+        self.client.post(reverse("storefront:checkout"), self.checkout_data(payment_method="razorpay"))
+        order = Order.objects.get()
+        response = self.client.post(reverse("storefront:razorpay_checkout_event", args=[order.number]), {
+            "event": "failed", "code": "BAD_REQUEST_ERROR", "reason": "input_validation_failed",
+            "description": "This is a test error.", "payment_id": "pay_test_diagnostic",
+        })
+        self.assertEqual(response.status_code, 204)
+        payment = PaymentTransaction.objects.get(order=order)
+        self.assertEqual(payment.status, PaymentTransaction.Status.CREATED)
+        self.assertEqual(payment.provider_payload["checkout_diagnostics"][-1]["code"], "BAD_REQUEST_ERROR")
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_CURRENCY="INR")
+    @patch("storefront.views.razorpay.Client")
     def test_cancelled_online_payment_restores_stock_keeps_cart_and_releases_coupon(self, client_class):
-        client_class.return_value.order.create.return_value = {"id": "order_test_cancel"}
+        client_class.return_value.payment_link.create.return_value = self.payment_link_response("plink_test_cancel", "order_test_cancel")
         coupon = Coupon.objects.create(code="SAVE10", discount_type="percent", value="10")
         self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
         response = self.client.post(reverse("storefront:checkout"), self.checkout_data(payment_method="razorpay", coupon_code=coupon.code))
@@ -216,6 +318,74 @@ class ShoppingFlowTests(TestCase):
         self.login_customer()
         self.client.post(reverse("storefront:add_review", args=[self.product.slug]), {"rating": 6, "title": "Invalid", "body": "This should not be accepted."})
         self.assertFalse(Review.objects.filter(product=self.product).exists())
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_WEBHOOK_SECRET="webhook-secret")
+    @patch("storefront.views.razorpay.Client")
+    def test_payment_link_webhook_marks_matching_payment_paid_once(self, client_class):
+        order = Order.objects.create(
+            email="buyer@example.com", full_name="Buyer", phone="9999999999", address_line1="1 Main",
+            city="Pune", state="Maharashtra", postal_code="411001", payment_method="razorpay",
+            subtotal="299", delivery_fee="49", total="348", status=Order.Status.PAYMENT_PENDING,
+            payment_status="initiated", inventory_deducted=True,
+        )
+        OrderItem.objects.create(order=order, product=self.product, product_name=self.product.name, quantity=1, unit_price="299")
+        payment = PaymentTransaction.objects.create(
+            order=order, provider_payment_link_id="plink_webhook_123", amount="348", currency="INR",
+            provider_payload={"payment_link_id": "plink_webhook_123", "payment_link_url": "https://rzp.io/i/plink_webhook_123"},
+        )
+        payload = {
+            "event": "payment_link.paid",
+            "payload": {
+                "payment": {"entity": {"id": "pay_webhook_123", "order_id": "order_webhook_123", "amount": 34800, "currency": "INR", "status": "captured"}},
+                "payment_link": {"entity": {"id": "plink_webhook_123", "reference_id": order.number, "amount": 34800, "currency": "INR", "status": "paid"}},
+            },
+        }
+        response = self.client.post(
+            reverse("storefront:razorpay_webhook"), data=json.dumps(payload), content_type="application/json",
+            headers={"X-Razorpay-Signature": "valid", "X-Razorpay-Event-Id": "event-payment-link-1"},
+        )
+        self.assertEqual(response.status_code, 200)
+        order.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual(order.payment_status, "paid")
+        self.assertEqual(payment.status, PaymentTransaction.Status.CAPTURED)
+        self.assertEqual(payment.provider_payment_id, "pay_webhook_123")
+
+        self.client.post(
+            reverse("storefront:razorpay_webhook"), data=json.dumps(payload), content_type="application/json",
+            headers={"X-Razorpay-Signature": "valid", "X-Razorpay-Event-Id": "event-payment-link-1"},
+        )
+        self.assertEqual(PaymentTransaction.objects.count(), 1)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_WEBHOOK_SECRET="webhook-secret")
+    @patch("storefront.views.razorpay.Client")
+    def test_invalid_payment_link_webhook_does_not_mark_paid(self, client_class):
+        order = Order.objects.create(
+            email="buyer@example.com", full_name="Buyer", phone="9999999999", address_line1="1 Main",
+            city="Pune", state="Maharashtra", postal_code="411001", payment_method="razorpay",
+            subtotal="299", delivery_fee="49", total="348", status=Order.Status.PAYMENT_PENDING,
+            payment_status="initiated", inventory_deducted=True,
+        )
+        payment = PaymentTransaction.objects.create(
+            order=order, provider_payment_link_id="plink_right", amount="348", currency="INR",
+            provider_payload={"payment_link_id": "plink_right", "payment_link_url": "https://rzp.io/i/plink_right"},
+        )
+        payload = {
+            "event": "payment_link.paid",
+            "payload": {
+                "payment": {"entity": {"id": "pay_wrong", "amount": 34800, "currency": "INR", "status": "captured"}},
+                "payment_link": {"entity": {"id": "plink_wrong", "reference_id": order.number, "amount": 34800, "currency": "INR", "status": "paid"}},
+            },
+        }
+        response = self.client.post(
+            reverse("storefront:razorpay_webhook"), data=json.dumps(payload), content_type="application/json",
+            headers={"X-Razorpay-Signature": "valid", "X-Razorpay-Event-Id": "event-payment-link-wrong"},
+        )
+        self.assertEqual(response.status_code, 200)
+        order.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual(order.payment_status, "initiated")
+        self.assertEqual(payment.status, PaymentTransaction.Status.CREATED)
 
     @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_WEBHOOK_SECRET="webhook-secret")
     @patch("storefront.views.razorpay.Client")

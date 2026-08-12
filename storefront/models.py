@@ -313,7 +313,8 @@ class PaymentTransaction(models.Model):
 
     order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name="payment_transaction")
     provider = models.CharField(max_length=20, choices=Provider.choices, default=Provider.RAZORPAY)
-    provider_order_id = models.CharField(max_length=100, unique=True)
+    provider_order_id = models.CharField(max_length=100, null=True, blank=True, unique=True)
+    provider_payment_link_id = models.CharField(max_length=100, null=True, blank=True, unique=True)
     provider_payment_id = models.CharField(max_length=100, null=True, blank=True, unique=True)
     provider_refund_id = models.CharField(max_length=100, null=True, blank=True, unique=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)

@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation
 from difflib import get_close_matches
 import hashlib
 import json
+import logging
 from uuid import uuid4
 
 import razorpay
@@ -19,14 +20,19 @@ from django.db import IntegrityError, transaction
 from django.db.models import Avg, Count, DecimalField, ExpressionWrapper, F, Q, Sum
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from .cart import Cart
 from .forms import AddressForm, CheckoutForm, MarketingPreferenceForm, OrderRequestForm, OTPVerificationForm, ProductQuestionForm, ReviewForm, SignUpForm, SupportTicketForm
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductQuestion, ProductVariant, ProductView, Review, SavedForLaterItem, Shipment, SupportTicket, WishlistItem
+from .payments.razorpay_links import PaymentLinkError, cancel_payment_link, create_payment_link, verify_payment_link_signature
 from .services import calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, restore_order_inventory
+
+
+logger = logging.getLogger(__name__)
 
 
 def home(request):
@@ -382,6 +388,9 @@ def checkout(request):
                 _remember_order(request, existing_order.number)
                 payment = getattr(existing_order, "payment_transaction", None)
                 if payment and payment.status == PaymentTransaction.Status.CREATED:
+                    payment_link_url = payment.provider_payload.get("payment_link_url")
+                    if payment_link_url:
+                        return redirect(payment_link_url)
                     return redirect("storefront:payment_checkout", number=existing_order.number)
                 return redirect("storefront:order_confirmation", number=existing_order.number)
             coupon_code = form.cleaned_data["coupon_code"].strip().upper() or cart.coupon_code
@@ -404,23 +413,38 @@ def checkout(request):
                         notify_order_email(order, "order_placed", f"Order {order.number} confirmed", f"Thanks for your order. Total: ₹{order.total}")
                         return redirect("storefront:order_confirmation", number=order.number)
                     try:
-                        provider_order = _razorpay_client().order.create({
-                            "amount": int(order.total * 100), "currency": settings.RAZORPAY_CURRENCY,
-                            "receipt": order.number, "notes": {"ikart_order": order.number},
-                        })
-                        PaymentTransaction.objects.create(order=order, provider_order_id=provider_order["id"], amount=order.total, currency=settings.RAZORPAY_CURRENCY)
+                        callback_url = request.build_absolute_uri(reverse("storefront:razorpay_payment_link_callback", args=[order.number]))
+                        payment_link = create_payment_link(_razorpay_client(), order, callback_url)
+                        with transaction.atomic():
+                            PaymentTransaction.objects.create(
+                                order=order,
+                                provider_order_id=payment_link.get("order_id") or None,
+                                provider_payment_link_id=payment_link["id"],
+                                amount=order.total,
+                                currency=settings.RAZORPAY_CURRENCY,
+                                provider_payload={
+                                    "payment_link_id": payment_link["id"],
+                                    "payment_link_url": payment_link["short_url"],
+                                    "payment_link_status": payment_link.get("status", "created"),
+                                    "payment_link_reference_id": payment_link.get("reference_id") or order.number,
+                                },
+                            )
                     except Exception:
+                        logger.exception("Razorpay hosted payment link creation failed for order %s", order.number)
                         with transaction.atomic():
                             order = Order.objects.select_for_update().get(pk=order.pk)
                             restore_order_inventory(order)
                             CouponRedemption.objects.filter(order=order).delete()
                             order.status = Order.Status.PAYMENT_FAILED
                             order.payment_status = "failed"
-                            order.save(update_fields=["status", "payment_status", "updated_at"])
-                        request.session.pop("checkout_token", None)
+                            order.checkout_token = None
+                            order.save(update_fields=["status", "payment_status", "checkout_token", "updated_at"])
+                        fresh_token = _new_checkout_token(request)
+                        form.data = form.data.copy()
+                        form.data["checkout_token"] = str(fresh_token)
                         form.add_error("payment_method", "Could not start the payment. No payment was taken; please try again.")
                     else:
-                        return redirect("storefront:payment_checkout", number=order.number)
+                        return redirect(payment_link["short_url"])
     else:
         form = CheckoutForm(initial={"email": request.user.email, "coupon_code": cart.coupon_code, "checkout_token": checkout_token} if request.user.is_authenticated else {"coupon_code": cart.coupon_code, "checkout_token": checkout_token}, user=request.user)
     quote = calculate_cart_quote(cart, request.user, form.data.get("delivery_option", Order.DeliveryOption.STANDARD) if form.is_bound else Order.DeliveryOption.STANDARD, form.data.get("coupon_code", cart.coupon_code) if form.is_bound else cart.coupon_code)
@@ -440,7 +464,72 @@ def payment_checkout(request, number):
     if payment.status != PaymentTransaction.Status.CREATED:
         messages.error(request, "This payment attempt is no longer active. Please place a new order.")
         return redirect("storefront:cart")
-    return render(request, "storefront/payment_checkout.html", {"order": order, "payment": payment, "razorpay_key_id": settings.RAZORPAY_KEY_ID, "amount_paise": int(order.total * 100)})
+    payment_link_url = payment.provider_payload.get("payment_link_url")
+    if not payment_link_url:
+        messages.error(request, "This legacy payment attempt cannot be resumed. Please cancel it and start checkout again.")
+        return redirect("storefront:cart")
+    return render(request, "storefront/payment_link_checkout.html", {"order": order, "payment_link_url": payment_link_url})
+
+
+@require_GET
+def razorpay_payment_link_callback(request, number):
+    """Verify the signed hosted-link return and finalise only a captured payment."""
+    order = get_object_or_404(Order, number=number)
+    payment = get_object_or_404(PaymentTransaction, order=order)
+    payment_link_id = request.GET.get("razorpay_payment_link_id", "")
+    reference_id = request.GET.get("razorpay_payment_link_reference_id", "")
+    link_status = request.GET.get("razorpay_payment_link_status", "")
+    payment_id = request.GET.get("razorpay_payment_id", "")
+    signature = request.GET.get("razorpay_signature", "")
+    expected_link_id = payment.provider_payment_link_id or payment.provider_payload.get("payment_link_id", "")
+    if (
+        payment_link_id != expected_link_id
+        or reference_id != order.number
+        or link_status != "paid"
+        or not payment_id
+        or not signature
+        or not verify_payment_link_signature(payment_link_id, reference_id, link_status, payment_id, signature)
+    ):
+        logger.warning("Invalid Razorpay payment link callback for order %s", order.number)
+        messages.error(request, "We could not verify this payment return. Please wait for the payment status update.")
+        return redirect("storefront:order_confirmation", number=order.number)
+    if payment.status == PaymentTransaction.Status.CAPTURED:
+        _remember_order(request, order.number)
+        return redirect("storefront:order_confirmation", number=order.number)
+    client = _razorpay_client()
+    try:
+        provider_payment = client.payment.fetch(payment_id)
+        fetched_order_id = provider_payment.get("order_id")
+        if (
+            (payment.provider_order_id and fetched_order_id != payment.provider_order_id)
+            or int(provider_payment.get("amount", 0)) != int(payment.amount * 100)
+            or provider_payment.get("currency") != payment.currency
+        ):
+            raise PaymentLinkError("Payment details did not match the order.")
+        if not payment.provider_order_id and fetched_order_id:
+            PaymentTransaction.objects.filter(pk=payment.pk, provider_order_id__isnull=True).update(provider_order_id=fetched_order_id)
+            payment.provider_order_id = fetched_order_id
+        if provider_payment.get("status") == "authorized":
+            provider_payment = client.payment.capture(payment_id, int(payment.amount * 100), {"currency": payment.currency})
+    except PaymentLinkError:
+        logger.warning("Razorpay payment link callback did not match order %s", order.number)
+        messages.error(request, "Payment details did not match this order. Please contact support.")
+        return redirect("storefront:order_confirmation", number=order.number)
+    except Exception:
+        logger.exception("Razorpay payment link callback fetch failed for order %s", order.number)
+        messages.info(request, "Your payment is being confirmed. We will update the order shortly.")
+        _remember_order(request, order.number)
+        return redirect("storefront:order_confirmation", number=order.number)
+    if provider_payment.get("status") != "captured":
+        messages.info(request, "Your payment is awaiting capture. We will update the order shortly.")
+        _remember_order(request, order.number)
+        return redirect("storefront:order_confirmation", number=order.number)
+    order = mark_payment_captured(payment, payment_id, provider_payment)
+    Cart(request).clear()
+    request.session.pop("checkout_token", None)
+    _remember_order(request, order.number)
+    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", f"Your payment was successful. Total paid: ₹{order.total}")
+    return redirect("storefront:order_confirmation", number=order.number)
 
 
 @require_POST
@@ -538,10 +627,45 @@ def cancel_razorpay_payment(request, number):
     payment = get_object_or_404(PaymentTransaction, order=order)
     if payment.status == PaymentTransaction.Status.CAPTURED:
         return redirect("storefront:order_confirmation", number=order.number)
+    payment_link_id = payment.provider_payload.get("payment_link_id")
+    if payment_link_id:
+        try:
+            cancel_payment_link(_razorpay_client(), payment_link_id)
+        except Exception:
+            logger.exception("Razorpay hosted payment link cancellation failed for order %s", order.number)
+            messages.error(request, "We could not safely cancel the Razorpay payment page. Please try again shortly.")
+            return redirect("storefront:payment_checkout", number=order.number)
     fail_or_cancel_payment(payment, PaymentTransaction.Status.CANCELLED, {"reason": "customer_cancelled"})
     request.session.pop("checkout_token", None)
     messages.info(request, "Payment was cancelled and reserved stock was released.")
     return redirect("storefront:cart")
+
+
+@require_POST
+def razorpay_checkout_event(request, number):
+    """Persist a small, non-sensitive browser diagnostic without changing payment state."""
+    order = get_object_or_404(Order, number=number)
+    if not _can_access_order(request, order):
+        raise Http404
+    payment = get_object_or_404(PaymentTransaction, order=order)
+    event = request.POST.get("event", "")[:40]
+    if event not in {"opened", "dismissed", "failed", "client_error"}:
+        return HttpResponse(status=400)
+    diagnostic = {"event": event, "at": timezone.now().isoformat()}
+    for field, maximum_length in (("code", 100), ("source", 100), ("step", 100), ("reason", 100), ("description", 300), ("payment_id", 100)):
+        value = request.POST.get(field, "").strip()
+        if value:
+            diagnostic[field] = value[:maximum_length]
+    with transaction.atomic():
+        payment = PaymentTransaction.objects.select_for_update().get(pk=payment.pk)
+        payload = dict(payment.provider_payload or {})
+        diagnostics = list(payload.get("checkout_diagnostics", []))[-9:]
+        diagnostics.append(diagnostic)
+        payload["checkout_diagnostics"] = diagnostics
+        payment.provider_payload = payload
+        payment.save(update_fields=["provider_payload", "updated_at"])
+    logger.info("Razorpay checkout event %s for order %s", event, order.number)
+    return HttpResponse(status=204)
 
 
 def _apply_refund_webhook(payment, refund, succeeded):
@@ -599,14 +723,28 @@ def razorpay_webhook(request):
     payload_entities = payload.get("payload", {})
     entity = payload_entities.get("payment", {}).get("entity", {})
     refund_entity = payload_entities.get("refund", {}).get("entity", {})
+    payment_link_entity = payload_entities.get("payment_link", {}).get("entity", {})
     provider_order_id = entity.get("order_id") or payload.get("payload", {}).get("order", {}).get("entity", {}).get("id")
-    payment = PaymentTransaction.objects.filter(provider_order_id=provider_order_id).first()
+    payment = None
+    if provider_order_id:
+        payment = PaymentTransaction.objects.filter(provider_order_id=provider_order_id).first()
+    if not payment and payment_link_entity.get("id"):
+        payment = PaymentTransaction.objects.filter(provider_payment_link_id=payment_link_entity["id"]).first()
+    if not payment and payment_link_entity.get("id"):
+        payment = PaymentTransaction.objects.filter(provider_payload__payment_link_id=payment_link_entity["id"]).first()
     if not payment and refund_entity.get("payment_id"):
         payment = PaymentTransaction.objects.filter(provider_payment_id=refund_entity["payment_id"]).first()
     if not payment:
         return HttpResponse(status=200)
     try:
-        if event in {"payment.captured", "order.paid"}:
+        if event in {"payment.captured", "order.paid", "payment_link.paid"}:
+            if event == "payment_link.paid" and (
+                payment_link_entity.get("id") != payment.provider_payload.get("payment_link_id")
+                or payment_link_entity.get("reference_id") != payment.order.number
+                or int(payment_link_entity.get("amount", 0)) != int(payment.amount * 100)
+                or payment_link_entity.get("currency") != payment.currency
+            ):
+                return HttpResponse(status=200)
             if payment.status in {
                 PaymentTransaction.Status.CREATED,
                 PaymentTransaction.Status.AUTHORIZED,

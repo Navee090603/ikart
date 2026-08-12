@@ -134,11 +134,13 @@ def mark_payment_captured(payment, payment_id, payload=None):
             # failed payment. Keep it out of fulfilment and let staff resolve it.
             if payment_id:
                 payment.provider_payment_id = payment_id
+            if payload and isinstance(payload, dict) and payload.get("order_id") and not payment.provider_order_id:
+                payment.provider_order_id = payload["order_id"]
             payment.status = PaymentTransaction.Status.CAPTURED
             payment.verified_at = timezone.now()
             if payload:
-                payment.provider_payload = payload
-            payment.save(update_fields=["provider_payment_id", "status", "verified_at", "provider_payload", "updated_at"])
+                payment.provider_payload = {**payment.provider_payload, "payment": payload}
+            payment.save(update_fields=["provider_order_id", "provider_payment_id", "status", "verified_at", "provider_payload", "updated_at"])
             order.payment_status = "paid_manual_review"
             order.status = Order.Status.PAYMENT_PENDING
             order.save(update_fields=["payment_status", "status", "updated_at"])
@@ -146,11 +148,13 @@ def mark_payment_captured(payment, payment_id, payload=None):
             return order
         if payment_id:
             payment.provider_payment_id = payment_id
+        if payload and isinstance(payload, dict) and payload.get("order_id") and not payment.provider_order_id:
+            payment.provider_order_id = payload["order_id"]
         payment.status = PaymentTransaction.Status.CAPTURED
         payment.verified_at = timezone.now()
         if payload:
-            payment.provider_payload = payload
-        payment.save(update_fields=["provider_payment_id", "status", "verified_at", "provider_payload", "updated_at"])
+            payment.provider_payload = {**payment.provider_payload, "payment": payload}
+        payment.save(update_fields=["provider_order_id", "provider_payment_id", "status", "verified_at", "provider_payload", "updated_at"])
         order.payment_status = "paid"
         order.status = Order.Status.PLACED
         order.save(update_fields=["payment_status", "status", "updated_at"])
@@ -168,7 +172,7 @@ def fail_or_cancel_payment(payment, status, payload=None):
             return payment.order
         payment.status = status
         if payload:
-            payment.provider_payload = payload
+            payment.provider_payload = {**payment.provider_payload, "failure": payload}
         payment.inventory_released = True
         payment.save(update_fields=["status", "provider_payload", "inventory_released", "updated_at"])
         order = payment.order

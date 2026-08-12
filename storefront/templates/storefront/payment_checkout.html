@@ -1,3 +1,130 @@
 {% extends 'storefront/base.html' %}
+
 {% block title %}Secure payment | IKart{% endblock %}
-{% block content %}<div class="max-w-xl mx-auto px-4 py-12"><div class="bg-white rounded-xl p-7 text-center"><h1 class="text-2xl font-bold">Complete secure payment</h1><p class="text-slate-600 mt-3">Order {{ order.number }} · ₹{{ order.total }}</p><button id="pay-button" class="btn btn-primary mt-6">Pay ₹{{ order.total }} securely</button><form id="success-form" method="post" action="{% url 'storefront:verify_razorpay_payment' order.number %}" class="hidden">{% csrf_token %}<input name="razorpay_payment_id"><input name="razorpay_order_id"><input name="razorpay_signature"></form><form id="cancel-form" method="post" action="{% url 'storefront:cancel_razorpay_payment' order.number %}" class="mt-4">{% csrf_token %}<button class="text-sm text-slate-600">Cancel payment</button></form></div></div><script src="https://checkout.razorpay.com/v1/checkout.js"></script><script>let succeeded=false;const options={key:'{{ razorpay_key_id|escapejs }}',amount:'{{ amount_paise }}',currency:'{{ payment.currency }}',name:'IKart',description:'Order {{ order.number }}',order_id:'{{ payment.provider_order_id }}',prefill:{name:'{{ order.full_name|escapejs }}',email:'{{ order.email|escapejs }}',contact:'{{ order.phone|escapejs }}'},handler:r=>{succeeded=true;const f=document.getElementById('success-form');f.razorpay_payment_id.value=r.razorpay_payment_id;f.razorpay_order_id.value=r.razorpay_order_id;f.razorpay_signature.value=r.razorpay_signature;f.submit()},modal:{ondismiss:()=>{if(!succeeded)document.getElementById('cancel-form').submit()}},theme:{color:'#f59e0b'}};const rzp=new Razorpay(options);rzp.on('payment.failed',()=>{if(!succeeded)document.getElementById('cancel-form').submit()});document.getElementById('pay-button').onclick=e=>{e.preventDefault();rzp.open()};</script>{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto px-4 py-12">
+  <div class="bg-white rounded-xl p-7 text-center">
+    <h1 class="text-2xl font-bold">Complete secure payment</h1>
+    <p class="text-slate-600 mt-3">Order {{ order.number }} · ₹{{ order.total }}</p>
+    <p id="payment-status" class="hidden mt-4 text-sm" role="status" aria-live="polite"></p>
+
+    <button id="pay-button" type="button" class="btn btn-primary mt-6">
+      Pay ₹{{ order.total }} securely
+    </button>
+
+    <form id="success-form" method="post" action="{% url 'storefront:verify_razorpay_payment' order.number %}" class="hidden">
+      {% csrf_token %}
+      <input type="hidden" name="razorpay_payment_id">
+      <input type="hidden" name="razorpay_order_id">
+      <input type="hidden" name="razorpay_signature">
+    </form>
+
+    <form id="cancel-form" method="post" action="{% url 'storefront:cancel_razorpay_payment' order.number %}" class="mt-4">
+      {% csrf_token %}
+      <button id="cancel-button" type="submit" class="text-sm text-slate-600 underline">Cancel payment</button>
+    </form>
+  </div>
+</div>
+
+<script id="razorpay-checkout-script" src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+  (() => {
+    const payButton = document.getElementById("pay-button");
+    const cancelButton = document.getElementById("cancel-button");
+    const successForm = document.getElementById("success-form");
+    const cancelForm = document.getElementById("cancel-form");
+    const status = document.getElementById("payment-status");
+    const csrfToken = successForm.elements.csrfmiddlewaretoken.value;
+    let submitting = false;
+
+    const setStatus = (message, isError = false) => {
+      status.textContent = message;
+      status.className = `mt-4 text-sm ${isError ? "text-red-600" : "text-slate-600"}`;
+    };
+    const reportEvent = (event, details = {}) => {
+      const data = new URLSearchParams({ event });
+      ["code", "source", "step", "reason", "description", "payment_id"].forEach((field) => {
+        if (details[field]) data.set(field, String(details[field]));
+      });
+      fetch("{% url 'storefront:razorpay_checkout_event' order.number %}", {
+        method: "POST",
+        credentials: "same-origin",
+        keepalive: true,
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-CSRFToken": csrfToken
+        },
+        body: data
+      }).catch(() => {});
+    };
+
+    if (typeof Razorpay === "undefined") {
+      setStatus("Secure checkout could not be loaded. Please refresh and try again.", true);
+      payButton.disabled = true;
+      return;
+    }
+
+    const checkout = new Razorpay({
+      key: "{{ razorpay_key_id|escapejs }}",
+      amount: "{{ amount_paise }}",
+      currency: "{{ payment.currency|escapejs }}",
+      name: "IKart",
+      description: "Order {{ order.number|escapejs }}",
+      order_id: "{{ payment.provider_order_id|escapejs }}",
+      prefill: {
+        name: "{{ order.full_name|escapejs }}",
+        email: "{{ order.email|escapejs }}",
+        contact: "{{ razorpay_contact|escapejs }}"
+      },
+      handler(response) {
+        if (submitting) return;
+        submitting = true;
+        payButton.disabled = true;
+        cancelButton.disabled = true;
+        setStatus("Verifying your payment…");
+        successForm.elements.razorpay_payment_id.value = response.razorpay_payment_id;
+        successForm.elements.razorpay_order_id.value = response.razorpay_order_id;
+        successForm.elements.razorpay_signature.value = response.razorpay_signature;
+        successForm.submit();
+      },
+      modal: {
+        confirm_close: true,
+        backdropclose: false,
+        ondismiss() {
+          if (!submitting) {
+            reportEvent("dismissed");
+            setStatus("Payment window closed. You can try again or cancel this payment.");
+          }
+        }
+      },
+      retry: { enabled: true, max_count: 4 },
+      theme: { color: "#f59e0b" }
+    });
+
+    checkout.on("payment.failed", (response) => {
+      const error = response.error || {};
+      reportEvent("failed", {
+        code: error.code,
+        source: error.source,
+        step: error.step,
+        reason: error.reason,
+        description: error.description,
+        payment_id: error.metadata && error.metadata.payment_id
+      });
+      setStatus(error.description || "Razorpay could not complete this payment. Please try again or choose another payment method.", true);
+    });
+    payButton.addEventListener("click", () => {
+      if (submitting) return;
+      setStatus("");
+      try {
+        checkout.open();
+        reportEvent("opened");
+      } catch (error) {
+        reportEvent("client_error", { description: error && error.message });
+        setStatus("Secure checkout could not be opened. Disable popup/privacy blockers for Razorpay and try again.", true);
+      }
+    });
+  })();
+</script>
+{% endblock %}

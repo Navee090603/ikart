@@ -1,0 +1,18 @@
+{% extends 'storefront/base.html' %}
+
+{% block title %}Secure payment | IKart{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto px-4 py-12">
+  <div class="bg-white rounded-xl p-7 text-center">
+    <h1 class="text-2xl font-bold">Continue to secure payment</h1>
+    <p class="text-slate-600 mt-3">Order {{ order.number }} · ₹{{ order.total }}</p>
+    <p class="text-sm text-slate-500 mt-4">You will be redirected in this tab to Razorpay’s secure hosted payment page.</p>
+    <a href="{{ payment_link_url }}" rel="noopener" class="btn btn-primary mt-6">Pay ₹{{ order.total }} with Razorpay</a>
+    <form method="post" action="{% url 'storefront:cancel_razorpay_payment' order.number %}" class="mt-4">
+      {% csrf_token %}
+      <button type="submit" class="text-sm text-slate-600 underline">Cancel payment</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
