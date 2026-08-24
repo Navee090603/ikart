@@ -51,7 +51,19 @@ TEMPLATES = [{
 }]
 WSGI_APPLICATION = "ikart.wsgi.application"
 
-DATABASES = {"default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")}
+DATABASES = {
+    "default": env.db(
+        "DATABASE_URL",
+        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"
+    )
+}
+
+DATABASES["default"]["CONN_MAX_AGE"] = 60
+
+DATABASES["default"]["OPTIONS"] = {
+    "sslmode": "require",
+    "connect_timeout": 10,
+}
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},

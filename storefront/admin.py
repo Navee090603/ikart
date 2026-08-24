@@ -1,6 +1,7 @@
 import csv
 from decimal import Decimal, InvalidOperation
 from io import TextIOWrapper
+from django import forms
 
 from django.contrib import admin, messages
 from django.db import transaction
@@ -10,6 +11,7 @@ from django.urls import path, reverse
 from django.utils.text import slugify
 
 from .forms import ProductCSVUploadForm
+from .forms import CategoryCSVUploadForm
 from django.core.mail import send_mail
 
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, NotificationLog, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductImage, ProductQuestion, ProductVariant, Review, SavedForLaterItem, Shipment, ShipmentEvent, SupportTicket, SupportTicketReply, WishlistItem
@@ -28,74 +30,510 @@ class ProductVariantInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ("name", "brand", "category", "price", "stock", "low_stock", "is_active", "is_featured")
-    list_filter = ("is_active", "is_featured", "category", "brand")
-    search_fields = ("name", "brand", "description")
-    prepopulated_fields = {"slug": ("name",)}
-    change_list_template = "admin/storefront/product/change_list.html"
-    inlines = [ProductImageInline, ProductVariantInline]
+    list_display = (
+        "name",
+        "brand",
+        "category",
+        "price",
+        "stock",
+        "low_stock",
+        "is_active",
+        "is_featured",
+    )
 
-    @admin.display(boolean=True, description="Low stock")
+    list_filter = (
+        "is_active",
+        "is_featured",
+        "category",
+        "brand",
+    )
+
+    search_fields = (
+        "name",
+        "brand",
+        "description",
+    )
+
+    prepopulated_fields = {
+        "slug": ("name",)
+    }
+
+    change_list_template = "admin/storefront/product/change_list.html"
+
+    inlines = [
+        ProductImageInline,
+        ProductVariantInline
+    ]
+
+
+    @admin.display(
+        boolean=True,
+        description="Low stock"
+    )
     def low_stock(self, product):
         return product.is_low_stock
 
+
+
     def get_urls(self):
+
         urls = super().get_urls()
-        return [path("upload-csv/", self.admin_site.admin_view(self.upload_csv), name="storefront_product_upload_csv")] + urls
+
+        custom_urls = [
+            path(
+                "upload-csv/",
+                self.admin_site.admin_view(self.upload_csv),
+                name="storefront_product_upload_csv",
+            )
+        ]
+
+        return custom_urls + urls
+
+
 
     def upload_csv(self, request):
-        if request.method == "POST":
-            form = ProductCSVUploadForm(request.POST, request.FILES)
-            if form.is_valid():
-                reader = csv.DictReader(TextIOWrapper(form.cleaned_data["csv_file"].file, encoding="utf-8-sig"))
-                required = {"name", "category", "price", "stock", "description"}
-                if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
-                    form.add_error("csv_file", "Required columns: name, category, price, stock, description.")
-                else:
-                    rows, errors = [], []
-                    for line_number, row in enumerate(reader, start=2):
-                        name = (row.get("name") or "").strip()
-                        category_name = (row.get("category") or "").strip()
-                        description = (row.get("description") or "").strip()
-                        try:
-                            price = Decimal((row.get("price") or "").strip())
-                            stock = int((row.get("stock") or "").strip())
-                            low_stock_threshold = int((row.get("low_stock_threshold") or "5").strip())
-                            compare_at_price = Decimal(row["compare_at_price"].strip()) if (row.get("compare_at_price") or "").strip() else None
-                        except (InvalidOperation, ValueError):
-                            errors.append(f"Row {line_number}: price, stock, low_stock_threshold, or compare_at_price is invalid.")
-                            continue
-                        if not name or not slugify(name) or not category_name or not description:
-                            errors.append(f"Row {line_number}: name, category, and description are required.")
-                        elif price < 0 or stock < 0 or low_stock_threshold < 0:
-                            errors.append(f"Row {line_number}: price and stock values cannot be negative.")
-                        elif compare_at_price is not None and compare_at_price < price:
-                            errors.append(f"Row {line_number}: compare_at_price cannot be lower than price.")
-                        else:
-                            rows.append({
-                                "name": name, "slug": slugify(name), "category_name": category_name,
-                                "brand": (row.get("brand") or "").strip(),
-                                "short_description": (row.get("short_description") or "").strip() or description[:250],
-                                "description": description, "price": price, "stock": stock,
-                                "low_stock_threshold": low_stock_threshold, "compare_at_price": compare_at_price,
-                                "is_featured": (row.get("is_featured") or "").strip().lower() in {"true", "1", "yes"},
-                                "is_active": (row.get("is_active") or "true").strip().lower() not in {"false", "0", "no"},
-                            })
-                    if errors:
-                        form.add_error("csv_file", " ".join(errors[:5]))
-                    elif not rows:
-                        form.add_error("csv_file", "The CSV does not contain any product rows.")
-                    else:
-                        with transaction.atomic():
-                            for row in rows:
-                                category, _ = Category.objects.get_or_create(name=row.pop("category_name"))
-                                Product.objects.update_or_create(slug=row.pop("slug"), defaults={"category": category, **row})
-                        self.message_user(request, f"Imported or updated {len(rows)} products.", messages.SUCCESS)
-                        return redirect(reverse("admin:storefront_product_changelist"))
-        else:
-            form = ProductCSVUploadForm()
-        return render(request, "admin/storefront/product/csv_upload.html", {**self.admin_site.each_context(request), "form": form, "title": "Import products from CSV"})
 
+        if request.method == "POST":
+
+            form = ProductCSVUploadForm(
+                request.POST,
+                request.FILES
+            )
+
+
+            if form.is_valid():
+
+                csv_file = form.cleaned_data["csv_file"]
+
+
+                reader = csv.DictReader(
+                    TextIOWrapper(
+                        csv_file.file,
+                        encoding="utf-8-sig"
+                    )
+                )
+
+
+                required_columns = {
+                    "name",
+                    "category",
+                    "price",
+                    "stock",
+                    "description"
+                }
+
+
+                if (
+                    not reader.fieldnames
+                    or not required_columns.issubset(
+                        set(reader.fieldnames)
+                    )
+                ):
+
+                    form.add_error(
+                        "csv_file",
+                        "Required columns: name, category, price, stock, description"
+                    )
+
+
+                else:
+
+                    rows = []
+                    errors = []
+
+
+                    for line_number, row in enumerate(reader, start=2):
+
+                        name = (
+                            row.get("name") or ""
+                        ).strip()
+
+
+                        category_name = (
+                            row.get("category") or ""
+                        ).strip()
+
+
+                        description = (
+                            row.get("description") or ""
+                        ).strip()
+
+
+
+                        try:
+
+                            price = Decimal(
+                                row.get("price")
+                            )
+
+                            stock = int(
+                                row.get("stock")
+                            )
+
+
+                            low_stock_threshold = int(
+                                row.get(
+                                    "low_stock_threshold",
+                                    5
+                                )
+                            )
+
+
+                            compare_at_price = (
+
+                                Decimal(
+                                    row["compare_at_price"]
+                                )
+
+                                if row.get("compare_at_price")
+
+                                else None
+
+                            )
+
+
+                        except (
+                            InvalidOperation,
+                            ValueError,
+                            TypeError
+                        ):
+
+                            errors.append(
+                                f"Row {line_number}: Invalid price or stock"
+                            )
+
+                            continue
+
+
+
+                        if not name or not category_name or not description:
+
+                            errors.append(
+                                f"Row {line_number}: Required fields missing"
+                            )
+
+
+                        elif price < 0 or stock < 0:
+
+                            errors.append(
+                                f"Row {line_number}: Negative values not allowed"
+                            )
+
+
+                        elif (
+                            compare_at_price
+                            and compare_at_price < price
+                        ):
+
+                            errors.append(
+                                f"Row {line_number}: compare price cannot be lower"
+                            )
+
+
+                        else:
+
+
+                            rows.append({
+
+                                "name": name,
+
+                                "slug": slugify(name),
+
+                                "category_name": category_name,
+
+
+                                "brand": (
+                                    row.get("brand")
+                                    or ""
+                                ).strip(),
+
+
+                                "short_description": (
+                                    row.get("short_description")
+                                    or description[:250]
+                                ),
+
+
+                                "description": description,
+
+
+                                "price": price,
+
+
+                                "compare_at_price": compare_at_price,
+
+
+                                "stock": stock,
+
+
+                                "low_stock_threshold": low_stock_threshold,
+
+
+                                "is_featured":
+                                    (
+                                        row.get("is_featured","")
+                                        .lower()
+                                        in [
+                                            "true",
+                                            "1",
+                                            "yes"
+                                        ]
+                                    ),
+
+
+                                "is_active":
+                                    (
+                                        row.get(
+                                            "is_active",
+                                            "true"
+                                        )
+                                        .lower()
+                                        not in [
+                                            "false",
+                                            "0",
+                                            "no"
+                                        ]
+                                    ),
+
+
+
+                                "images":
+                                    (
+                                        row.get("images")
+                                        or ""
+                                    ).strip(),
+
+
+
+                                "variants":
+                                    (
+                                        row.get("variants")
+                                        or ""
+                                    ).strip(),
+
+                            })
+
+
+
+
+                    if errors:
+
+                        form.add_error(
+                            "csv_file",
+                            " | ".join(errors[:5])
+                        )
+
+
+                    elif not rows:
+
+                        form.add_error(
+                            "csv_file",
+                            "No products found"
+                        )
+
+
+
+                    else:
+
+
+                        with transaction.atomic():
+
+
+                            for row in rows:
+
+
+                                # -------------------------
+                                # CATEGORY CREATE
+                                # -------------------------
+
+                                category, _ = Category.objects.get_or_create(
+
+                                    name=row["category_name"],
+
+                                    defaults={
+                                        "slug": slugify(
+                                            row["category_name"]
+                                        )
+                                    }
+
+                                )
+
+
+
+                                # -------------------------
+                                # PRODUCT CREATE / UPDATE
+                                # -------------------------
+
+                                product, created = Product.objects.update_or_create(
+
+                                    slug=row["slug"],
+
+
+                                    defaults={
+
+                                        "category": category,
+
+                                        "name": row["name"],
+
+                                        "brand": row["brand"],
+
+                                        "short_description":
+                                            row["short_description"],
+
+                                        "description":
+                                            row["description"],
+
+                                        "price":
+                                            row["price"],
+
+                                        "compare_at_price":
+                                            row["compare_at_price"],
+
+                                        "stock":
+                                            row["stock"],
+
+                                        "low_stock_threshold":
+                                            row["low_stock_threshold"],
+
+                                        "is_featured":
+                                            row["is_featured"],
+
+                                        "is_active":
+                                            row["is_active"],
+
+                                    }
+
+                                )
+
+
+
+                                # -------------------------
+                                # PRODUCT IMAGES
+                                # -------------------------
+
+                                if row["images"]:
+
+
+                                    ProductImage.objects.filter(
+                                        product=product
+                                    ).delete()
+
+
+
+                                    image_list = row["images"].split("|")
+
+
+
+                                    for index, image_url in enumerate(image_list):
+
+
+                                        ProductImage.objects.create(
+
+                                            product=product,
+
+                                            image=image_url.strip(),
+
+                                            alt_text=product.name,
+
+                                            sort_order=index
+
+                                        )
+
+
+
+
+
+                                # -------------------------
+                                # PRODUCT VARIANTS
+                                # -------------------------
+
+                                if row["variants"]:
+
+
+                                    ProductVariant.objects.filter(
+                                        product=product
+                                    ).delete()
+
+
+
+                                    variant_list = row["variants"].split("|")
+
+
+
+                                    for variant in variant_list:
+
+
+                                        size, color, sku, adjustment, variant_stock = variant.split("-")
+
+
+
+                                        ProductVariant.objects.create(
+
+                                            product=product,
+
+                                            size=size,
+
+                                            color=color,
+
+                                            sku=sku,
+
+                                            price_adjustment=Decimal(
+                                                adjustment
+                                            ),
+
+                                            stock=int(
+                                                variant_stock
+                                            )
+
+                                        )
+
+
+
+                        self.message_user(
+
+                            request,
+
+                            f"Successfully imported {len(rows)} products",
+
+                            messages.SUCCESS
+
+                        )
+
+
+                        return redirect(
+
+                            reverse(
+                                "admin:storefront_product_changelist"
+                            )
+
+                        )
+
+
+
+        else:
+
+            form = ProductCSVUploadForm()
+
+
+
+        return render(
+
+            request,
+
+            "admin/storefront/product/csv_upload.html",
+
+            {
+
+                **self.admin_site.each_context(request),
+
+                "form": form,
+
+                "title":
+                    "Import products from CSV"
+
+            }
+
+        )
 
 class OrderItemInline(admin.TabularInline):
     model = OrderItem
@@ -296,4 +734,128 @@ class PaymentWebhookEventAdmin(admin.ModelAdmin):
     readonly_fields = ("provider", "event_id", "event_type", "payload", "processed_at")
 
 
-admin.site.register([Address, Category, CouponRedemption, FAQ, MarketingPreference, Review, SavedForLaterItem, WishlistItem])
+admin.site.register([Address, CouponRedemption, FAQ, MarketingPreference, Review, SavedForLaterItem, WishlistItem])
+
+@admin.register(Category)
+class CategoryAdmin(admin.ModelAdmin):
+
+    list_display = (
+        "name",
+        "parent",
+        "slug",
+    )
+
+    search_fields = (
+        "name",
+        "slug",
+    )
+
+
+    def get_urls(self):
+
+        urls = super().get_urls()
+
+        custom_urls = [
+            path(
+                "upload-category-csv/",
+                self.admin_site.admin_view(self.upload_csv),
+                name="category-upload-csv"
+            )
+        ]
+
+        return custom_urls + urls
+
+
+
+    def upload_csv(self, request):
+
+        if request.method == "POST":
+
+            form = CategoryCSVUploadForm(
+                request.POST,
+                request.FILES
+            )
+
+
+            if form.is_valid():
+
+                import csv
+
+                file = form.cleaned_data["csv_file"]
+
+
+                reader = csv.DictReader(
+                    file.read().decode("utf-8-sig").splitlines()
+                )
+
+
+                categories = {}
+
+
+                for row in reader:
+
+                    categories[row["name"]] = row
+
+
+
+                for name,row in categories.items():
+
+                    parent = None
+
+
+                    if row["parent_id"]:
+
+                        parent_name = None
+
+                        for item in categories.values():
+
+                            if item["category_id"] == row["parent_id"]:
+                                parent_name = item["name"]
+
+
+                        if parent_name:
+
+                            parent, _ = Category.objects.get_or_create(
+                                name=parent_name
+                            )
+
+
+
+                    Category.objects.update_or_create(
+
+                        slug=row["slug"],
+
+                        defaults={
+
+                            "name": name,
+
+                            "parent": parent,
+
+                        }
+
+                    )
+
+
+                self.message_user(
+                    request,
+                    "Categories imported successfully"
+                )
+
+                return redirect(
+                    "admin:storefront_category_changelist"
+                )
+
+
+        else:
+
+            form = CategoryCSVUploadForm()
+
+
+
+        return render(
+            request,
+            "admin/category_upload.html",
+            {
+                "form":form
+            }
+        )
