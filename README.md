@@ -54,6 +54,26 @@ The payment amount is created and checked on the server from the current cart qu
 
 Run `.venv/bin/python manage.py release_stale_payment_reservations` every 15 minutes in production (or use the **Payment transactions** admin action) to release abandoned checkout reservations. Set `PAYMENT_RESERVATION_MINUTES` if the default 30-minute hold does not suit the store.
 
+## Background tasks (Celery + Redis)
+
+The Celery application lives in `ikart/celery.py` and reads every `CELERY_*` setting from `ikart/settings.py`. Nothing runs on a worker yet: `CELERY_TASK_ALWAYS_EAGER` defaults to `True`, so any task executes inline in the calling process exactly as the current synchronous code does. Order emails and the reservation sweep move onto the queue in a later change.
+
+To run the queue locally with Docker:
+
+```bash
+docker compose up            # redis, web, worker, and beat
+```
+
+Or keep Django on the host and start only Redis plus the Celery processes:
+
+```bash
+docker run -d --name ikart-redis -p 6379:6379 redis:7.4-alpine
+.venv/bin/celery -A ikart worker -l info -Q ikart
+.venv/bin/celery -A ikart beat -l info --schedule /tmp/celerybeat-schedule
+```
+
+Set `CELERY_TASK_ALWAYS_EAGER=False` and `CELERY_BROKER_URL` in `.env` to route work to that worker. A worker sharing the development SQLite file will hit `database is locked` errors under concurrency, so point `DATABASE_URL` at PostgreSQL before enabling it. `PAYMENT_SWEEP_CRON_MINUTES` controls how often beat schedules the reservation sweep, which is separate from the `PAYMENT_RESERVATION_MINUTES` age threshold.
+
 ## Delivery roadmap
 
 ## Phase 2 — Growth

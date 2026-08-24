@@ -1,4 +1,5 @@
 asgiref==3.12.1
+celery[redis]==5.6.3
 certifi==2026.7.22
 charset-normalizer==3.4.9
 cloudinary==1.45.0
@@ -12,6 +13,7 @@ pillow==12.3.0
 psycopg==3.3.4
 psycopg-binary==3.3.4
 razorpay==2.0.1
+redis==5.3.1
 requests==2.34.2
 six==1.17.0
 sqlparse==0.5.5
