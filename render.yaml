@@ -11,9 +11,13 @@ services:
         value: "False"
       - key: DATABASE_URL
         sync: false
-      - key: CLOUDINARY_URL
-        sync: false
       - key: ALLOWED_HOSTS
+        sync: false
+      - key: SITE_URL
+        sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: CLOUDINARY_URL
         sync: false
       - key: RAZORPAY_KEY_ID
         sync: false

@@ -11,20 +11,20 @@ environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("SECRET_KEY", default="change-this-local-development-key")
 DEBUG = env("DEBUG")
-ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-    ".trycloudflare.com",
-]
+ALLOWED_HOSTS = env.list(
+    "ALLOWED_HOSTS",
+    default=["localhost", "127.0.0.1"],
+)
 
 SITE_URL = env(
     "SITE_URL",
-    default="http://127.0.0.1:8000",
+    default="http://127.0.0.1:8000" if DEBUG else "https://example.com",
 )
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://*.trycloudflare.com",
-]
+CSRF_TRUSTED_ORIGINS = env.list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=[],
+)
 
 if not DEBUG and SECRET_KEY == "change-this-local-development-key":
     raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG=False.")
@@ -60,10 +60,11 @@ DATABASES = {
 
 DATABASES["default"]["CONN_MAX_AGE"] = 60
 
-DATABASES["default"]["OPTIONS"] = {
-    "sslmode": "require",
-    "connect_timeout": 10,
-}
+if "postgresql" in DATABASES["default"].get("ENGINE", ""):
+    DATABASES["default"]["OPTIONS"] = {
+        "sslmode": "require",
+        "connect_timeout": 10,
+    }
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
