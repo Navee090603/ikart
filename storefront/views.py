@@ -30,9 +30,26 @@ from .forms import AddressForm, CheckoutForm, MarketingPreferenceForm, OrderRequ
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductQuestion, ProductVariant, ProductView, Review, SavedForLaterItem, Shipment, SupportTicket, WishlistItem
 from .payments.razorpay_links import PaymentLinkError, cancel_payment_link, create_payment_link, verify_payment_link_signature
 from .services import calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, restore_order_inventory
-
+from django.contrib.auth import views as auth_views
 
 logger = logging.getLogger(__name__)
+
+class IKartPasswordResetView(auth_views.PasswordResetView):
+    def form_valid(self, form):
+        site_url = settings.SITE_URL.rstrip("/")
+
+        form.save(
+            domain_override=site_url.replace("https://", "").replace("http://", ""),
+            use_https=site_url.startswith("https://"),
+            token_generator=self.token_generator,
+            from_email=self.from_email,
+            email_template_name=self.email_template_name,
+            subject_template_name=self.subject_template_name,
+            request=self.request,
+            html_email_template_name=self.html_email_template_name,
+            extra_email_context=None,
+        )
+        return redirect(self.get_success_url())
 
 
 def home(request):
