@@ -107,45 +107,39 @@ def _release_coupon_redemption(order):
 
 
 def _ensure_coupon_redemption(order):
-    """Restore a coupon reservation if a late verified payment arrives."""
+    """Restore a coupon reservation if a late verified payment arrives. Lock prevents concurrent redemption."""
     if order.coupon_id:
-        CouponRedemption.objects.get_or_create(
-            order=order,
-            defaults={
-                "coupon_id": order.coupon_id,
-                "user": order.user,
-                "discount_amount": order.discount_amount,
-            },
-        )
+        with transaction.atomic():
+            existing = CouponRedemption.objects.select_for_update().filter(order=order).first()
+            if not existing:
+                CouponRedemption.objects.create(
+                    order=order,
+                    coupon_id=order.coupon_id,
+                    user=order.user,
+                    discount_amount=order.discount_amount,
+                )
 
 
 def mark_payment_captured(payment, payment_id, payload=None):
-    """Idempotently finalise a verified Razorpay payment and keep reserved stock."""
+    """Idempotently finalise a verified Razorpay payment. Handles cases where inventory
+    may have already been deducted or restored (e.g., after a refund was processed).
+    If inventory can't be deducted (already gone), payment is marked as captured but
+    order status is set to PAYMENT_PENDING to indicate manual review is needed."""
     with transaction.atomic():
         payment = PaymentTransaction.objects.select_for_update().select_related("order").get(pk=payment.pk)
         if payment.status == PaymentTransaction.Status.CAPTURED:
             return payment.order
         order = payment.order
+        inventory_deduction_failed = False
         try:
             if not order.inventory_deducted or order.inventory_restored:
                 order = deduct_order_inventory(order)
-        except ValueError:
-            # A capture received after a user dismissal must never be treated as a
-            # failed payment. Keep it out of fulfilment and let staff resolve it.
-            if payment_id:
-                payment.provider_payment_id = payment_id
-            if payload and isinstance(payload, dict) and payload.get("order_id") and not payment.provider_order_id:
-                payment.provider_order_id = payload["order_id"]
-            payment.status = PaymentTransaction.Status.CAPTURED
-            payment.verified_at = timezone.now()
-            if payload:
-                payment.provider_payload = {**payment.provider_payload, "payment": payload}
-            payment.save(update_fields=["provider_order_id", "provider_payment_id", "status", "verified_at", "provider_payload", "updated_at"])
-            order.payment_status = "paid_manual_review"
-            order.status = Order.Status.PAYMENT_PENDING
-            order.save(update_fields=["payment_status", "status", "updated_at"])
-            _ensure_coupon_redemption(order)
-            return order
+        except ValueError as e:
+            inventory_deduction_failed = True
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Payment {payment.pk} captured but inventory deduction failed for order {order.number}: {e}"
+            )
         if payment_id:
             payment.provider_payment_id = payment_id
         if payload and isinstance(payload, dict) and payload.get("order_id") and not payment.provider_order_id:
@@ -155,8 +149,12 @@ def mark_payment_captured(payment, payment_id, payload=None):
         if payload:
             payment.provider_payload = {**payment.provider_payload, "payment": payload}
         payment.save(update_fields=["provider_order_id", "provider_payment_id", "status", "verified_at", "provider_payload", "updated_at"])
-        order.payment_status = "paid"
-        order.status = Order.Status.PLACED
+        if inventory_deduction_failed:
+            order.payment_status = "paid_manual_review"
+            order.status = Order.Status.PAYMENT_PENDING
+        else:
+            order.payment_status = "paid"
+            order.status = Order.Status.PLACED
         order.save(update_fields=["payment_status", "status", "updated_at"])
         _ensure_coupon_redemption(order)
         return order
