@@ -11,23 +11,34 @@ environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("SECRET_KEY", default="change-this-local-development-key")
 DEBUG = env("DEBUG")
-ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-    ".trycloudflare.com",
-]
+ALLOWED_HOSTS = env.list(
+    "ALLOWED_HOSTS",
+    default=["localhost", "127.0.0.1"],
+)
 
 SITE_URL = env(
     "SITE_URL",
-    default="http://127.0.0.1:8000",
+    default="http://127.0.0.1:8000" if DEBUG else None,
 )
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://*.trycloudflare.com",
-]
+CSRF_TRUSTED_ORIGINS = env.list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=[],
+)
 
 if not DEBUG and SECRET_KEY == "change-this-local-development-key":
     raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG=False.")
+
+if not DEBUG and not SITE_URL:
+    raise ImproperlyConfigured(
+        "SITE_URL environment variable must be set in production (e.g., https://yourdomain.com). "
+        "This is used for password reset email links and absolute URLs."
+    )
+
+if SITE_URL and not SITE_URL.startswith(("http://", "https://")):
+    raise ImproperlyConfigured(
+        f"SITE_URL must start with http:// or https://. Got: {SITE_URL}"
+    )
 
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
@@ -60,10 +71,11 @@ DATABASES = {
 
 DATABASES["default"]["CONN_MAX_AGE"] = 60
 
-DATABASES["default"]["OPTIONS"] = {
-    "sslmode": "require",
-    "connect_timeout": 10,
-}
+if "postgresql" in DATABASES["default"].get("ENGINE", ""):
+    DATABASES["default"]["OPTIONS"] = {
+        "sslmode": "require",
+        "connect_timeout": 10,
+    }
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},

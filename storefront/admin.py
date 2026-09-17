@@ -1,10 +1,13 @@
 import csv
 from decimal import Decimal, InvalidOperation
 from io import TextIOWrapper
+
+import requests
 from django import forms
+from django.core.files.base import ContentFile
 
 from django.contrib import admin, messages
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum
 from django.shortcuts import redirect, render
 from django.urls import path, reverse
@@ -235,6 +238,8 @@ class ProductAdmin(admin.ModelAdmin):
 
                             rows.append({
 
+                                "line_number": line_number,
+
                                 "name": name,
 
                                 "slug": slugify(name),
@@ -335,178 +340,40 @@ class ProductAdmin(admin.ModelAdmin):
 
                     else:
 
+                        imported_count = 0
 
-                        with transaction.atomic():
-
-
-                            for row in rows:
-
-
-                                # -------------------------
-                                # CATEGORY CREATE
-                                # -------------------------
-
-                                category, _ = Category.objects.get_or_create(
-
-                                    name=row["category_name"],
-
-                                    defaults={
-                                        "slug": slugify(
-                                            row["category_name"]
-                                        )
-                                    }
-
+                        for row in rows:
+                            line_number = row["line_number"]
+                            try:
+                                with transaction.atomic():
+                                    self._import_product_row(row, line_number, errors)
+                                imported_count += 1
+                            except Exception as e:
+                                errors.append(
+                                    f"Row {line_number}: Import failed, row skipped: {str(e)[:150]}"
                                 )
-
-
-
-                                # -------------------------
-                                # PRODUCT CREATE / UPDATE
-                                # -------------------------
-
-                                product, created = Product.objects.update_or_create(
-
-                                    slug=row["slug"],
-
-
-                                    defaults={
-
-                                        "category": category,
-
-                                        "name": row["name"],
-
-                                        "brand": row["brand"],
-
-                                        "short_description":
-                                            row["short_description"],
-
-                                        "description":
-                                            row["description"],
-
-                                        "price":
-                                            row["price"],
-
-                                        "compare_at_price":
-                                            row["compare_at_price"],
-
-                                        "stock":
-                                            row["stock"],
-
-                                        "low_stock_threshold":
-                                            row["low_stock_threshold"],
-
-                                        "is_featured":
-                                            row["is_featured"],
-
-                                        "is_active":
-                                            row["is_active"],
-
-                                    }
-
-                                )
-
-
-
-                                # -------------------------
-                                # PRODUCT IMAGES
-                                # -------------------------
-
-                                if row["images"]:
-
-
-                                    ProductImage.objects.filter(
-                                        product=product
-                                    ).delete()
-
-
-
-                                    image_list = row["images"].split("|")
-
-
-
-                                    for index, image_url in enumerate(image_list):
-
-
-                                        ProductImage.objects.create(
-
-                                            product=product,
-
-                                            image=image_url.strip(),
-
-                                            alt_text=product.name,
-
-                                            sort_order=index
-
-                                        )
-
-
-
-
-
-                                # -------------------------
-                                # PRODUCT VARIANTS
-                                # -------------------------
-
-                                if row["variants"]:
-
-
-                                    ProductVariant.objects.filter(
-                                        product=product
-                                    ).delete()
-
-
-
-                                    variant_list = row["variants"].split("|")
-
-
-
-                                    for variant in variant_list:
-
-
-                                        size, color, sku, adjustment, variant_stock = variant.split("-")
-
-
-
-                                        ProductVariant.objects.create(
-
-                                            product=product,
-
-                                            size=size,
-
-                                            color=color,
-
-                                            sku=sku,
-
-                                            price_adjustment=Decimal(
-                                                adjustment
-                                            ),
-
-                                            stock=int(
-                                                variant_stock
-                                            )
-
-                                        )
-
-
-
-                        self.message_user(
-
-                            request,
-
-                            f"Successfully imported {len(rows)} products",
-
-                            messages.SUCCESS
-
-                        )
-
-
-                        return redirect(
-
-                            reverse(
-                                "admin:storefront_product_changelist"
+                                continue
+
+                        if errors:
+                            form.add_error(
+                                "csv_file",
+                                " | ".join(errors[:5])
                             )
 
-                        )
+                        if imported_count:
+
+                            self.message_user(
+                                request,
+                                f"Successfully imported {imported_count} of {len(rows)} product(s)."
+                                + (f" {len(errors)} issue(s) reported below." if errors else ""),
+                                messages.SUCCESS if not errors else messages.WARNING
+                            )
+
+                            return redirect(
+                                reverse(
+                                    "admin:storefront_product_changelist"
+                                )
+                            )
 
 
 
@@ -534,6 +401,165 @@ class ProductAdmin(admin.ModelAdmin):
             }
 
         )
+
+    def _import_product_row(self, row, line_number, errors):
+        """Import a single CSV row. Runs inside a per-row transaction so one bad
+        row can't roll back products already imported earlier in the same file."""
+
+        # -------------------------
+        # CATEGORY CREATE
+        # -------------------------
+
+        category, _ = Category.objects.get_or_create(
+            name=row["category_name"],
+            defaults={"slug": slugify(row["category_name"])},
+        )
+
+        # -------------------------
+        # PRODUCT CREATE / UPDATE
+        # -------------------------
+
+        slug = row["slug"]
+        existing_product = Product.objects.filter(slug=slug).first()
+        if existing_product and existing_product.name != row["name"]:
+            counter = 2
+            original_slug = slug
+            while Product.objects.filter(slug=slug).exclude(name=row["name"]).exists():
+                slug = f"{original_slug}-{counter}"
+                counter += 1
+
+        product, created = Product.objects.update_or_create(
+            slug=slug,
+            defaults={
+                "category": category,
+                "name": row["name"],
+                "brand": row["brand"],
+                "short_description": row["short_description"],
+                "description": row["description"],
+                "price": row["price"],
+                "compare_at_price": row["compare_at_price"],
+                "stock": row["stock"],
+                "low_stock_threshold": row["low_stock_threshold"],
+                "is_featured": row["is_featured"],
+                "is_active": row["is_active"],
+            },
+        )
+
+        # -------------------------
+        # PRODUCT IMAGES
+        # -------------------------
+
+        if row["images"]:
+
+            ProductImage.objects.filter(product=product).delete()
+
+            image_list = row["images"].split("|")
+
+            for index, image_url in enumerate(image_list):
+
+                image_url = image_url.strip()
+                if not image_url:
+                    continue
+
+                if not image_url.startswith(("http://", "https://")):
+                    errors.append(
+                        f"Row {line_number}, image {index + 1}: "
+                        f"Image URL must start with http:// or https://. "
+                        f"Got: {image_url}"
+                    )
+                    continue
+
+                try:
+                    filename, content = self._fetch_image(image_url)
+                except (requests.RequestException, ValueError) as e:
+                    errors.append(
+                        f"Row {line_number}, image {index + 1}: "
+                        f"Could not download image from {image_url}: {str(e)[:100]}"
+                    )
+                    continue
+
+                image = ProductImage(
+                    product=product,
+                    alt_text=product.name,
+                    sort_order=index,
+                )
+                image.image.save(filename, content, save=True)
+
+        # -------------------------
+        # PRODUCT VARIANTS
+        # -------------------------
+
+        if row["variants"]:
+
+            ProductVariant.objects.filter(product=product).delete()
+
+            variant_list = row["variants"].split("|")
+
+            for variant_idx, variant in enumerate(variant_list, start=1):
+
+                parts = variant.split("-")
+                if len(parts) < 5:
+                    errors.append(
+                        f"Row {line_number}, variant {variant_idx}: "
+                        f"Expected format 'size-color-sku-adjustment-stock' "
+                        f"(SKU can contain hyphens). Got: {variant}"
+                    )
+                    continue
+
+                size = parts[0]
+                color = parts[1]
+                adjustment = parts[-2]
+                variant_stock = parts[-1]
+                sku = "-".join(parts[2:-2])
+
+                try:
+                    price_adj = Decimal(adjustment)
+                    stock_qty = int(variant_stock)
+                except (InvalidOperation, ValueError):
+                    errors.append(
+                        f"Row {line_number}, variant {variant_idx}: "
+                        f"Adjustment must be a decimal, stock must be an integer. "
+                        f"Got adjustment='{adjustment}', stock='{variant_stock}'"
+                    )
+                    continue
+
+                try:
+                    ProductVariant.objects.create(
+                        product=product,
+                        size=size,
+                        color=color,
+                        sku=sku,
+                        price_adjustment=price_adj,
+                        stock=stock_qty,
+                    )
+                except (IntegrityError, ValueError) as e:
+                    errors.append(
+                        f"Row {line_number}, variant {variant_idx}: "
+                        f"Failed to create variant: {str(e)[:100]}"
+                    )
+                    continue
+
+    @staticmethod
+    def _fetch_image(image_url, timeout=10, max_bytes=10 * 1024 * 1024):
+        """Download a remote image and return (filename, ContentFile) ready for an ImageField."""
+        response = requests.get(image_url, timeout=timeout, stream=True)
+        response.raise_for_status()
+
+        content_length = response.headers.get("Content-Length")
+        if content_length and int(content_length) > max_bytes:
+            raise ValueError("Image exceeds maximum allowed size")
+
+        data = response.raw.read(max_bytes + 1, decode_content=True)
+        if len(data) > max_bytes:
+            raise ValueError("Image exceeds maximum allowed size")
+
+        filename = image_url.rstrip("/").split("/")[-1].split("?")[0] or "image"
+        if "." not in filename:
+            content_type = response.headers.get("Content-Type", "")
+            ext = content_type.split("/")[-1].split(";")[0] if "/" in content_type else "jpg"
+            filename = f"{filename}.{ext}"
+
+        return filename, ContentFile(data)
 
 class OrderItemInline(admin.TabularInline):
     model = OrderItem
@@ -789,61 +815,78 @@ class CategoryAdmin(admin.ModelAdmin):
                 )
 
 
-                categories = {}
+                required_columns = {"name", "slug", "category_id", "parent_id"}
+
+                if not reader.fieldnames or not required_columns.issubset(set(reader.fieldnames or [])):
+                    form.add_error(
+                        "csv_file",
+                        f"Required columns: {', '.join(sorted(required_columns))}"
+                    )
+                else:
+
+                    categories = {}
 
 
-                for row in reader:
+                    for row in reader:
 
-                    categories[row["name"]] = row
+                        if not row.get("name") or not row.get("slug"):
+                            form.add_error(
+                                "csv_file",
+                                "All rows must have 'name' and 'slug' values"
+                            )
+                            break
 
-
-
-                for name,row in categories.items():
-
-                    parent = None
-
-
-                    if row["parent_id"]:
-
-                        parent_name = None
-
-                        for item in categories.values():
-
-                            if item["category_id"] == row["parent_id"]:
-                                parent_name = item["name"]
+                        categories[row["name"]] = row
 
 
-                        if parent_name:
+                    if not form.errors:
 
-                            parent, _ = Category.objects.get_or_create(
-                                name=parent_name
+                        for name, row in categories.items():
+
+                            parent = None
+
+
+                            if row.get("parent_id"):
+
+                                parent_name = None
+
+                                for item in categories.values():
+
+                                    if item.get("category_id") == row["parent_id"]:
+                                        parent_name = item["name"]
+
+
+                                if parent_name:
+
+                                    parent, _ = Category.objects.get_or_create(
+                                        name=parent_name
+                                    )
+
+
+
+                            Category.objects.update_or_create(
+
+                                slug=row["slug"],
+
+                                defaults={
+
+                                    "name": name,
+
+                                    "parent": parent,
+
+                                }
+
                             )
 
 
+                        self.message_user(
+                            request,
+                            "Categories imported successfully"
+                        )
 
-                    Category.objects.update_or_create(
-
-                        slug=row["slug"],
-
-                        defaults={
-
-                            "name": name,
-
-                            "parent": parent,
-
-                        }
-
-                    )
-
-
-                self.message_user(
-                    request,
-                    "Categories imported successfully"
-                )
-
-                return redirect(
-                    "admin:storefront_category_changelist"
-                )
+                        return redirect(
+                            "admin:storefront_category_changelist"
+                        )
 
 
         else:

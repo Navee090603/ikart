@@ -36,19 +36,35 @@ logger = logging.getLogger(__name__)
 
 class IKartPasswordResetView(auth_views.PasswordResetView):
     def form_valid(self, form):
-        site_url = settings.SITE_URL.rstrip("/")
+        logger = logging.getLogger(__name__)
+        if not settings.SITE_URL or not isinstance(settings.SITE_URL, str):
+            logger.error(f"SITE_URL is not properly configured: {settings.SITE_URL}")
+            messages.error(self.request, "Password reset is temporarily unavailable. Please try again later.")
+            return self.form_invalid(form)
 
-        form.save(
-            domain_override=site_url.replace("https://", "").replace("http://", ""),
-            use_https=site_url.startswith("https://"),
-            token_generator=self.token_generator,
-            from_email=self.from_email,
-            email_template_name=self.email_template_name,
-            subject_template_name=self.subject_template_name,
-            request=self.request,
-            html_email_template_name=self.html_email_template_name,
-            extra_email_context=None,
-        )
+        site_url = settings.SITE_URL.rstrip("/")
+        if not site_url.startswith(("http://", "https://")):
+            logger.error(f"SITE_URL must start with http:// or https://: {site_url}")
+            messages.error(self.request, "Password reset is temporarily unavailable. Please try again later.")
+            return self.form_invalid(form)
+
+        try:
+            form.save(
+                domain_override=site_url.replace("https://", "").replace("http://", ""),
+                use_https=site_url.startswith("https://"),
+                token_generator=self.token_generator,
+                from_email=self.from_email,
+                email_template_name=self.email_template_name,
+                subject_template_name=self.subject_template_name,
+                request=self.request,
+                html_email_template_name=self.html_email_template_name,
+                extra_email_context=None,
+            )
+        except Exception as e:
+            logger.exception(f"Failed to send password reset email: {e}")
+            messages.error(self.request, "Failed to send password reset email. Please try again later.")
+            return self.form_invalid(form)
+
         return redirect(self.get_success_url())
 
 
@@ -336,12 +352,29 @@ def _new_checkout_token(request):
 
 
 def _remember_order(request, number):
-    orders = request.session.get("recent_order_numbers", [])
-    request.session["recent_order_numbers"] = [number, *[item for item in orders if item != number]][:10]
+    """Store order number in session with timestamp for access control and expiry."""
+    orders = request.session.get("recent_order_numbers", {})
+    if not isinstance(orders, dict):
+        orders = {}
+    now = timezone.now()
+    orders[number] = now.isoformat()
+    filtered = {k: v for k, v in orders.items() if k != number}
+    filtered[number] = now.isoformat()
+    request.session["recent_order_numbers"] = dict(list(filtered.items())[-10:])
 
 
 def _can_access_order(request, order):
-    return (order.user and request.user.is_authenticated and order.user == request.user) or order.number in request.session.get("recent_order_numbers", [])
+    """Check if guest/authenticated user can view this order via session or user auth."""
+    if order.user and request.user.is_authenticated and order.user == request.user:
+        return True
+    orders = request.session.get("recent_order_numbers", {})
+    if not isinstance(orders, dict):
+        return False
+    if order.number not in orders:
+        return False
+    order_time = datetime.fromisoformat(orders[order.number])
+    is_expired = timezone.now() - order_time > timedelta(hours=24)
+    return not is_expired
 
 
 def _razorpay_client():
@@ -806,10 +839,9 @@ def razorpay_webhook(request):
 
 def order_confirmation(request, number):
     order = get_object_or_404(Order, number=number)
-    can_view = (order.user and order.user == request.user) or number in request.session.get("recent_order_numbers", [])
-    if not can_view:
+    if not _can_access_order(request, order):
         raise Http404
-    return render(request, "storefront/order_confirmation.html", {"order": order, "shipment": getattr(order, "shipment", None), "requests": order.requests.all() if can_view else []})
+    return render(request, "storefront/order_confirmation.html", {"order": order, "shipment": getattr(order, "shipment", None), "requests": order.requests.all()})
 
 
 @login_required
