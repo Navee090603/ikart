@@ -17,6 +17,10 @@ ALLOWED_HOSTS = env.list(
     default=["localhost", "127.0.0.1"],
 )
 
+# Lets ops move the admin off the well-known /admin/ path in production
+# without a code change (e.g. ADMIN_URL=staff-portal-x7k2/).
+ADMIN_URL = env("ADMIN_URL", default="admin/")
+
 SITE_URL = env(
     "SITE_URL",
     default="http://127.0.0.1:8000" if DEBUG else None,
@@ -51,6 +55,7 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware", "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware", "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware", "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "storefront.middleware.ContentSecurityPolicyMiddleware",
 ]
 ROOT_URLCONF = "ikart.urls"
 TEMPLATES = [{

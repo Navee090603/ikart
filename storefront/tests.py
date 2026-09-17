@@ -822,6 +822,52 @@ class RateLimitTests(TestCase):
         response = self.client.post(url, {"username": "nobody", "password": "wrong"})
         self.assertEqual(response.status_code, 429)
 
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    def test_admin_login_is_rate_limited_per_ip(self):
+        url = reverse("admin:login")
+        for _ in range(15):
+            response = self.client.post(url, {"username": "nobody", "password": "wrong"})
+            self.assertNotEqual(response.status_code, 429)
+        response = self.client.post(url, {"username": "nobody", "password": "wrong"})
+        self.assertEqual(response.status_code, 429)
+
+
+class SecurityHeaderTests(TestCase):
+    def test_content_security_policy_header_is_present(self):
+        response = self.client.get(reverse("storefront:home"))
+        self.assertIn("Content-Security-Policy", response)
+        self.assertIn("default-src 'self'", response["Content-Security-Policy"])
+        self.assertIn("frame-ancestors 'none'", response["Content-Security-Policy"])
+
+
+@override_settings(DEBUG=False, ALLOWED_HOSTS=["testserver"])
+class CustomErrorPageTests(TestCase):
+    def test_404_uses_custom_branded_template(self):
+        response = self.client.get("/this-page-does-not-exist/")
+        self.assertEqual(response.status_code, 404)
+        self.assertContains(response, "couldn't find that page", status_code=404)
+
+
+class CartPruneStaleTests(TestCase):
+    def setUp(self):
+        category = Category.objects.create(name="Home")
+        self.product = Product.objects.create(
+            category=category, name="Coffee mug", short_description="Ceramic mug",
+            description="A sturdy everyday mug.", price="299.00", stock=5,
+        )
+
+    def test_cart_page_notifies_user_when_stale_item_is_removed(self):
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
+        self.product.is_active = False
+        self.product.save(update_fields=["is_active"])
+        response = self.client.get(reverse("storefront:cart"), follow=True)
+        self.assertContains(response, "no longer available and was removed")
+        session = self.client.session
+        self.assertEqual(session.get("cart", {}), {})
+
 
 class WebhookErrorLoggingTests(TestCase):
     @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_WEBHOOK_SECRET="webhook-secret")

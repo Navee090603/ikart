@@ -181,6 +181,14 @@ def add_to_cart(request, product_id):
 
 def cart_detail(request):
     cart = Cart(request)
+    removed_count = cart.prune_stale()
+    if removed_count:
+        messages.info(
+            request,
+            f"{removed_count} item(s) in your cart are no longer available and were removed."
+            if removed_count > 1
+            else "An item in your cart is no longer available and was removed.",
+        )
     quote = calculate_cart_quote(cart, request.user, coupon_code=cart.coupon_code)
     return render(request, "storefront/cart.html", {"cart": cart, "quote": quote})
 
@@ -435,6 +443,14 @@ def _create_order_from_cart(form, cart, quote, checkout_token, payment_pending=F
 @rate_limit("checkout", limit=30, period_seconds=300)
 def checkout(request):
     cart = Cart(request)
+    removed_count = cart.prune_stale()
+    if removed_count:
+        messages.info(
+            request,
+            f"{removed_count} item(s) in your cart are no longer available and were removed."
+            if removed_count > 1
+            else "An item in your cart is no longer available and was removed.",
+        )
     if not cart.count:
         messages.info(request, "Your cart is empty.")
         return redirect("storefront:product_list")
@@ -627,6 +643,7 @@ def verify_razorpay_payment(request, number):
         messages.error(request, "Payment verification failed. No payment was taken.")
         return redirect("storefront:cart")
     except Exception:
+        logger.exception("Razorpay signature verification threw unexpectedly for order %s", order.number)
         messages.error(request, "We could not verify this payment yet. Please wait for the order status update.")
         return redirect("storefront:order_confirmation", number=order.number)
     try:
@@ -906,6 +923,7 @@ def signup(request):
             try:
                 code_hash, expires_at = _send_verification_code(form.cleaned_data["email"])
             except Exception:
+                logger.exception("Failed to send signup verification email to %s", form.cleaned_data["email"])
                 form.add_error(None, "We could not send a verification email. Check the email settings and try again.")
                 return render(request, "registration/signup.html", {"form": form})
             request.session["pending_registration"] = {
@@ -984,6 +1002,7 @@ def resend_verification_code(request):
     try:
         code_hash, expires_at = _send_verification_code(pending["email"])
     except Exception:
+        logger.exception("Failed to resend verification email to %s", pending["email"])
         messages.error(request, "We could not send a new verification email. Please try again shortly.")
         return redirect("storefront:verify_email")
     pending.update({"code_hash": code_hash, "expires_at": expires_at.isoformat(), "attempts": 0, "last_sent_at": timezone.now().isoformat()})
