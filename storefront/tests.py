@@ -16,6 +16,8 @@ from .models import Address, Category, Coupon, CouponRedemption, Order, OrderIte
 
 class ShoppingFlowTests(TestCase):
     def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
         category = Category.objects.create(name="Home")
         self.product = Product.objects.create(
             category=category, name="Coffee mug", short_description="Ceramic mug",
@@ -431,6 +433,70 @@ class ShoppingFlowTests(TestCase):
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, 5)
 
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_WEBHOOK_SECRET="webhook-secret")
+    @patch("storefront.views.razorpay.Client")
+    def test_refund_failed_webhook_keeps_order_pending_and_does_not_restore_stock(self, client_class):
+        order = Order.objects.create(
+            email="buyer@example.com", full_name="Buyer", phone="9999999999", address_line1="1 Main",
+            city="Pune", state="Maharashtra", postal_code="411001", payment_method="razorpay",
+            subtotal="299", delivery_fee="49", total="348", status=Order.Status.PLACED,
+            payment_status="refund_pending", inventory_deducted=True,
+        )
+        OrderItem.objects.create(order=order, product=self.product, product_name=self.product.name, quantity=1, unit_price="299")
+        payment = PaymentTransaction.objects.create(
+            order=order, provider_order_id="order_refund_fail_123", provider_payment_id="pay_refund_fail_123",
+            provider_refund_id="rfnd_fail_123", amount="348", status=PaymentTransaction.Status.REFUND_PENDING,
+        )
+        payload = {
+            "event": "refund.failed",
+            "payload": {"refund": {"entity": {"id": "rfnd_fail_123", "payment_id": "pay_refund_fail_123", "amount": 34800, "currency": "INR", "status": "failed"}}},
+        }
+        response = self.client.post(
+            reverse("storefront:razorpay_webhook"), data=json.dumps(payload), content_type="application/json",
+            headers={"X-Razorpay-Signature": "valid", "X-Razorpay-Event-Id": "event-refund-fail-1"},
+        )
+        self.assertEqual(response.status_code, 200)
+        order.refresh_from_db()
+        payment.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertNotEqual(order.status, Order.Status.REFUNDED)
+        self.assertNotEqual(payment.status, PaymentTransaction.Status.REFUNDED)
+        self.assertEqual(self.product.stock, 5)
+
+    def test_refund_captured_payment_rejects_uncaptured_payment(self):
+        from storefront.services import refund_captured_payment
+        order = Order.objects.create(
+            email="buyer@example.com", full_name="Buyer", phone="9999999999", address_line1="1 Main",
+            city="Pune", state="Maharashtra", postal_code="411001", payment_method="razorpay",
+            subtotal="299", delivery_fee="49", total="348", status=Order.Status.PAYMENT_PENDING,
+            payment_status="initiated",
+        )
+        PaymentTransaction.objects.create(
+            order=order, amount="348", status=PaymentTransaction.Status.CREATED,
+        )
+        with self.assertRaises(ValueError):
+            refund_captured_payment(order)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret")
+    @patch("storefront.services.razorpay.Client")
+    def test_refund_captured_payment_issues_gateway_refund(self, client_class):
+        from storefront.services import refund_captured_payment
+        client_class.return_value.payment.refund.return_value = {"id": "rfnd_new_1", "status": "processed"}
+        order = Order.objects.create(
+            email="buyer@example.com", full_name="Buyer", phone="9999999999", address_line1="1 Main",
+            city="Pune", state="Maharashtra", postal_code="411001", payment_method="razorpay",
+            subtotal="299", delivery_fee="49", total="348", status=Order.Status.PLACED,
+            payment_status="paid",
+        )
+        payment = PaymentTransaction.objects.create(
+            order=order, provider_payment_id="pay_capture_1", amount="348", status=PaymentTransaction.Status.CAPTURED,
+        )
+        result = refund_captured_payment(order)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, PaymentTransaction.Status.REFUNDED)
+        self.assertEqual(payment.provider_refund_id, "rfnd_new_1")
+        self.assertEqual(result.pk, payment.pk)
+
     def test_stale_payment_reservation_command_releases_stock(self):
         order = Order.objects.create(
             email="buyer@example.com", full_name="Buyer", phone="9999999999", address_line1="1 Main",
@@ -715,3 +781,57 @@ class ProductCSVImportAdminTests(TestCase):
         self.assertNotEqual(image.image.name, "https://example.com/mug.png")
         self.assertEqual(image.image.read(), b"fake-image-bytes")
         image.image.delete(save=False)
+
+
+class HealthCheckTests(TestCase):
+    def test_health_check_returns_ok_when_database_is_reachable(self):
+        response = self.client.get(reverse("health_check"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"ok")
+
+    @patch("django.db.connection.ensure_connection", side_effect=Exception("db down"))
+    def test_health_check_returns_503_when_database_is_unreachable(self, mock_ensure):
+        response = self.client.get(reverse("health_check"))
+        self.assertEqual(response.status_code, 503)
+
+
+class RateLimitTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def test_signup_is_rate_limited_per_ip(self):
+        url = reverse("storefront:signup")
+        for _ in range(10):
+            response = self.client.post(url, {
+                "username": "someone", "email": "someone@example.com",
+                "password1": "not-a-real-check", "password2": "not-a-real-check",
+            })
+            self.assertNotEqual(response.status_code, 429)
+        response = self.client.post(url, {
+            "username": "someone", "email": "someone@example.com",
+            "password1": "not-a-real-check", "password2": "not-a-real-check",
+        })
+        self.assertEqual(response.status_code, 429)
+
+    def test_login_is_rate_limited_per_ip(self):
+        url = reverse("login")
+        for _ in range(15):
+            response = self.client.post(url, {"username": "nobody", "password": "wrong"})
+            self.assertNotEqual(response.status_code, 429)
+        response = self.client.post(url, {"username": "nobody", "password": "wrong"})
+        self.assertEqual(response.status_code, 429)
+
+
+class WebhookErrorLoggingTests(TestCase):
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_WEBHOOK_SECRET="webhook-secret")
+    @patch("storefront.views.razorpay.Client")
+    def test_invalid_webhook_signature_is_logged(self, client_class):
+        client_class.return_value.utility.verify_webhook_signature.side_effect = Exception("bad signature")
+        with self.assertLogs("storefront.views", level="WARNING") as logs:
+            response = self.client.post(
+                reverse("storefront:razorpay_webhook"), data=json.dumps({"event": "payment.captured"}),
+                content_type="application/json", headers={"X-Razorpay-Signature": "invalid"},
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(any("invalid signature" in message.lower() for message in logs.output))

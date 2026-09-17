@@ -1,6 +1,7 @@
 import os
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from urllib.parse import urlparse
 
 import environ
 from django.core.exceptions import ImproperlyConfigured
@@ -70,6 +71,7 @@ DATABASES = {
 }
 
 DATABASES["default"]["CONN_MAX_AGE"] = 60
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 
 if "postgresql" in DATABASES["default"].get("ENGINE", ""):
     DATABASES["default"]["OPTIONS"] = {
@@ -111,10 +113,19 @@ EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=10)
 
-# Cloudinary media storage
+# Cloudinary media storage. Accepts either the single CLOUDINARY_URL
+# (cloudinary://API_KEY:API_SECRET@CLOUD_NAME) documented in render.yaml and
+# .env.example, or the three separate vars, whichever is set.
 CLOUDINARY_CLOUD_NAME = env("CLOUDINARY_CLOUD_NAME", default="")
 CLOUDINARY_API_KEY = env("CLOUDINARY_API_KEY", default="")
 CLOUDINARY_API_SECRET = env("CLOUDINARY_API_SECRET", default="")
+
+_cloudinary_url = env("CLOUDINARY_URL", default="")
+if _cloudinary_url and not all([CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET]):
+    _parsed = urlparse(_cloudinary_url)
+    CLOUDINARY_CLOUD_NAME = CLOUDINARY_CLOUD_NAME or (_parsed.hostname or "")
+    CLOUDINARY_API_KEY = CLOUDINARY_API_KEY or (_parsed.username or "")
+    CLOUDINARY_API_SECRET = CLOUDINARY_API_SECRET or (_parsed.password or "")
 
 if all([CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET]):
     STORAGES["default"] = {
@@ -124,6 +135,13 @@ if all([CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET]):
     CLOUDINARY_STORAGE = {
         "PREFIX": "",
     }
+elif not DEBUG:
+    # Render's filesystem is ephemeral: without Cloudinary, uploaded media
+    # (product images) would silently disappear on every redeploy.
+    raise ImproperlyConfigured(
+        "CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET must all be set "
+        "in production so uploaded media survives redeploys."
+    )
 
 # Keys are intentionally optional: checkout supports cash on delivery until a gateway is configured.
 RAZORPAY_KEY_ID = env("RAZORPAY_KEY_ID", default="")
@@ -144,3 +162,44 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31_536_000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+
+# Render (and most PaaS platforms) collect whatever goes to stdout/stderr, so
+# route everything there rather than to a file nobody will read.
+LOG_LEVEL = env("LOG_LEVEL", default="INFO" if not DEBUG else "DEBUG")
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{asctime} {levelname} {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": LOG_LEVEL,
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "django.security": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "storefront": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}
