@@ -18,7 +18,13 @@ class ContentSecurityPolicyMiddleware:
         "frame-src 'self' https://*.razorpay.com; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
-        "form-action 'self';"
+        # Checkout submits to this app, but a successful Razorpay payment-link
+        # order is redirected by the server to Razorpay's hosted payment page,
+        # which lands on the bare razorpay.com domain (not a *.razorpay.com
+        # subdomain) via an rzp.io short link. Chrome/Firefox enforce
+        # form-action across redirects that follow a form submission, so both
+        # hosts must be allowed or that redirect is silently blocked.
+        "form-action 'self' https://rzp.io https://razorpay.com;"
     )
 
     def __init__(self, get_response):
