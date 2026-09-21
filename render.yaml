@@ -2,6 +2,7 @@ services:
   - type: web
     name: ikart
     env: python
+    plan: free
     buildCommand: ./build.sh
     startCommand: gunicorn ikart.wsgi:application
     healthCheckPath: /healthz/
