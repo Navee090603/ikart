@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
+import logging
 
 from django.conf import settings
 from django.core.mail import send_mail
@@ -272,6 +273,9 @@ def notify_order_email(order, event, subject, message):
     try:
         send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [order.email], fail_silently=False)
     except Exception:
+        logging.getLogger(__name__).exception(
+            "Failed to send '%s' email for order %s", event, order.number,
+        )
         log.delivery_status = "failed"
         log.save(update_fields=["delivery_status"])
         return False

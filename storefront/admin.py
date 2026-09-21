@@ -1,4 +1,5 @@
 import csv
+import logging
 from decimal import Decimal, InvalidOperation
 from io import TextIOWrapper
 
@@ -19,6 +20,8 @@ from django.core.mail import send_mail
 
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, NotificationLog, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductImage, ProductQuestion, ProductVariant, Review, SavedForLaterItem, Shipment, ShipmentEvent, SupportTicket, SupportTicketReply, WishlistItem
 from .services import fail_or_cancel_payment, notify_order_email, refund_captured_payment, restore_order_inventory
+
+logger = logging.getLogger(__name__)
 
 
 class ProductImageInline(admin.TabularInline):
@@ -644,6 +647,7 @@ class CouponAdmin(admin.ModelAdmin):
                     NotificationLog.objects.create(recipient=recipient, channel=NotificationLog.Channel.EMAIL, event="promotion", subject=subject, message=body, delivery_status="sent")
                     sent += 1
                 except Exception:
+                    logger.exception("Failed to send promotion email for coupon %s to %s", coupon.code, recipient)
                     NotificationLog.objects.create(recipient=recipient, channel=NotificationLog.Channel.EMAIL, event="promotion", subject=subject, message=body, delivery_status="failed")
         self.message_user(request, f"Queued {sent} promotional email(s).", messages.SUCCESS)
 
@@ -667,6 +671,7 @@ class OrderRequestAdmin(admin.ModelAdmin):
                 self.message_user(request, str(error), messages.ERROR)
                 return
             except Exception:
+                logger.exception("Razorpay refund failed to start for order %s", obj.order.number)
                 self.message_user(request, "Razorpay refund could not be started. The request was not updated.", messages.ERROR)
                 return
             if payment and payment.status == payment.Status.REFUND_PENDING:

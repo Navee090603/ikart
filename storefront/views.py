@@ -29,10 +29,23 @@ from .cart import Cart
 from .forms import AddressForm, CheckoutForm, MarketingPreferenceForm, OrderRequestForm, OTPVerificationForm, ProductQuestionForm, ReviewForm, SignUpForm, SupportTicketForm
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductQuestion, ProductVariant, ProductView, Review, SavedForLaterItem, Shipment, SupportTicket, WishlistItem
 from .payments.razorpay_links import PaymentLinkError, cancel_payment_link, create_payment_link, verify_payment_link_signature
+from .ratelimit import rate_limit
 from .services import calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, restore_order_inventory
 from django.contrib.auth import views as auth_views
 
 logger = logging.getLogger(__name__)
+
+
+@require_GET
+def health_check(request):
+    from django.db import connection
+    try:
+        connection.ensure_connection()
+    except Exception:
+        logger.exception("Health check failed: database connection unavailable.")
+        return HttpResponse("unavailable", status=503)
+    return HttpResponse("ok", status=200)
+
 
 class IKartPasswordResetView(auth_views.PasswordResetView):
     def form_valid(self, form):
@@ -168,6 +181,14 @@ def add_to_cart(request, product_id):
 
 def cart_detail(request):
     cart = Cart(request)
+    removed_count = cart.prune_stale()
+    if removed_count:
+        messages.info(
+            request,
+            f"{removed_count} item(s) in your cart are no longer available and were removed."
+            if removed_count > 1
+            else "An item in your cart is no longer available and was removed.",
+        )
     quote = calculate_cart_quote(cart, request.user, coupon_code=cart.coupon_code)
     return render(request, "storefront/cart.html", {"cart": cart, "quote": quote})
 
@@ -419,8 +440,17 @@ def _create_order_from_cart(form, cart, quote, checkout_token, payment_pending=F
         return order
 
 
+@rate_limit("checkout", limit=30, period_seconds=300)
 def checkout(request):
     cart = Cart(request)
+    removed_count = cart.prune_stale()
+    if removed_count:
+        messages.info(
+            request,
+            f"{removed_count} item(s) in your cart are no longer available and were removed."
+            if removed_count > 1
+            else "An item in your cart is no longer available and was removed.",
+        )
     if not cart.count:
         messages.info(request, "Your cart is empty.")
         return redirect("storefront:product_list")
@@ -613,6 +643,7 @@ def verify_razorpay_payment(request, number):
         messages.error(request, "Payment verification failed. No payment was taken.")
         return redirect("storefront:cart")
     except Exception:
+        logger.exception("Razorpay signature verification threw unexpectedly for order %s", order.number)
         messages.error(request, "We could not verify this payment yet. Please wait for the order status update.")
         return redirect("storefront:order_confirmation", number=order.number)
     try:
@@ -762,6 +793,7 @@ def razorpay_webhook(request):
         client.utility.verify_webhook_signature(request.body.decode("utf-8"), signature, settings.RAZORPAY_WEBHOOK_SECRET)
         payload = json.loads(request.body)
     except Exception:
+        logger.warning("Razorpay webhook rejected: invalid signature or malformed payload.")
         return HttpResponse(status=400)
     event_id = request.headers.get("X-Razorpay-Event-Id") or hashlib.sha256(request.body).hexdigest()
     event = payload.get("event", "")
@@ -831,6 +863,10 @@ def razorpay_webhook(request):
             order = _apply_refund_webhook(payment, refund_entity, succeeded=False)
             notify_order_email(order, "refund_failed", f"Order {order.number}: refund needs attention", "Your refund could not be processed yet. Our support team will contact you.")
     except Exception:
+        logger.exception(
+            "Razorpay webhook processing failed for event_id=%s event_type=%s payment_id=%s",
+            event_id, event, payment.pk,
+        )
         # Delete the idempotency marker so Razorpay can retry a transient failure.
         webhook_event.delete()
         return HttpResponse(status=500)
@@ -879,6 +915,7 @@ def request_order_change(request, number, request_type):
     return render(request, "storefront/order_request.html", {"form": form, "order": order, "request_type": request_type})
 
 
+@rate_limit("signup", limit=10, period_seconds=600)
 def signup(request):
     if request.method == "POST":
         form = SignUpForm(request.POST)
@@ -886,6 +923,7 @@ def signup(request):
             try:
                 code_hash, expires_at = _send_verification_code(form.cleaned_data["email"])
             except Exception:
+                logger.exception("Failed to send signup verification email to %s", form.cleaned_data["email"])
                 form.add_error(None, "We could not send a verification email. Check the email settings and try again.")
                 return render(request, "registration/signup.html", {"form": form})
             request.session["pending_registration"] = {
@@ -916,6 +954,7 @@ def _send_verification_code(email):
     return make_password(code), timezone.now() + timedelta(minutes=10)
 
 
+@rate_limit("verify_email", limit=20, period_seconds=600)
 def verify_email(request):
     pending = request.session.get("pending_registration")
     if not pending:
@@ -950,6 +989,7 @@ def verify_email(request):
 
 
 @require_POST
+@rate_limit("resend_otp", limit=5, period_seconds=600)
 def resend_verification_code(request):
     pending = request.session.get("pending_registration")
     if not pending:
@@ -962,6 +1002,7 @@ def resend_verification_code(request):
     try:
         code_hash, expires_at = _send_verification_code(pending["email"])
     except Exception:
+        logger.exception("Failed to resend verification email to %s", pending["email"])
         messages.error(request, "We could not send a new verification email. Please try again shortly.")
         return redirect("storefront:verify_email")
     pending.update({"code_hash": code_hash, "expires_at": expires_at.isoformat(), "attempts": 0, "last_sent_at": timezone.now().isoformat()})

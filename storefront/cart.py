@@ -61,6 +61,20 @@ class Cart:
             price = product.price + (variant.price_adjustment if variant else Decimal("0"))
             yield {"key": key, "product": product, "variant": variant, "quantity": item["quantity"], "price": price, "total": price * item["quantity"]}
 
+    def prune_stale(self):
+        """Remove items whose product/variant vanished or was deactivated since being added.
+
+        Returns the number of items removed, so callers can tell the user
+        their cart changed instead of it silently shrinking.
+        """
+        live_keys = {item["key"] for item in self}
+        stale_keys = [key for key in self.data if key not in live_keys]
+        for key in stale_keys:
+            self.data.pop(key, None)
+        if stale_keys:
+            self._save()
+        return len(stale_keys)
+
     @property
     def subtotal(self):
         return sum((item["total"] for item in self), Decimal("0"))
