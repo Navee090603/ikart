@@ -722,6 +722,23 @@ class ProductCSVImportAdminTests(TestCase):
         self.assertEqual(variant.price_adjustment, 0)
         self.assertEqual(variant.stock, 50)
 
+    def test_duplicate_sku_within_row_skips_only_that_variant(self):
+        """A DB-level IntegrityError (not a format error) must not abort the
+        whole per-row transaction: Postgres poisons the transaction on any
+        constraint violation, so without a savepoint around each variant
+        create, one duplicate SKU would take the product and every later
+        variant in the same row down with it."""
+        from .models import ProductVariant
+        csv_text = (
+            "name,category,price,stock,description,variants\n"
+            "Dress,Apparel,999,10,A dress,S-Teal-DRESS-0-5|M-Teal-DRESS-0-8|L-Teal-DRESS-0-3\n"
+        )
+        self._upload(csv_text)
+        self.assertTrue(Product.objects.filter(name="Dress").exists())
+        variants = ProductVariant.objects.filter(product__name="Dress")
+        self.assertEqual(variants.count(), 1)
+        self.assertEqual(variants.first().size, "S")
+
     def test_bad_row_does_not_roll_back_other_valid_rows(self):
         csv_text = (
             "name,category,price,stock,description,variants\n"

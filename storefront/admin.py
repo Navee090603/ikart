@@ -527,14 +527,21 @@ class ProductAdmin(admin.ModelAdmin):
                     continue
 
                 try:
-                    ProductVariant.objects.create(
-                        product=product,
-                        size=size,
-                        color=color,
-                        sku=sku,
-                        price_adjustment=price_adj,
-                        stock=stock_qty,
-                    )
+                    # A nested atomic() opens a savepoint: on IntegrityError
+                    # (e.g. duplicate SKU) only this variant is rolled back.
+                    # Without it, Postgres aborts the whole outer per-row
+                    # transaction and every later query in this row -- even
+                    # the next variant -- fails with "current transaction is
+                    # aborted", taking the entire product down with it.
+                    with transaction.atomic():
+                        ProductVariant.objects.create(
+                            product=product,
+                            size=size,
+                            color=color,
+                            sku=sku,
+                            price_adjustment=price_adj,
+                            stock=stock_qty,
+                        )
                 except (IntegrityError, ValueError) as e:
                     errors.append(
                         f"Row {line_number}, variant {variant_idx}: "
