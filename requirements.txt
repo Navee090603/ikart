@@ -3,6 +3,7 @@ certifi==2026.7.22
 charset-normalizer==3.4.9
 cloudinary==1.45.0
 Django==5.2.17
+django-anymail==15.2
 django-cloudinary-storage==0.3.0
 django-environ==0.14.0
 gunicorn==26.0.0
