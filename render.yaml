@@ -29,9 +29,7 @@ services:
         sync: false
       - key: RAZORPAY_WEBHOOK_SECRET
         sync: false
-      - key: EMAIL_HOST_USER
-        sync: false
-      - key: EMAIL_HOST_PASSWORD
+      - key: BREVO_API_KEY
         sync: false
       - key: DEFAULT_FROM_EMAIL
         sync: false

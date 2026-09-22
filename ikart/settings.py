@@ -48,7 +48,7 @@ if SITE_URL and not SITE_URL.startswith(("http://", "https://")):
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
     "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
-    "cloudinary", "cloudinary_storage", "storefront",
+    "cloudinary", "cloudinary_storage", "anymail", "storefront",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware", "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -105,10 +105,14 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_REDIRECT_URL = "storefront:home"
 LOGOUT_REDIRECT_URL = "storefront:home"
-# Keep local OTP testing visible in the terminal; production uses the configured SMTP server.
+# Keep local OTP testing visible in the terminal. Production defaults to Brevo's
+# HTTP API (via django-anymail) rather than raw SMTP: Render blocks outbound
+# traffic on SMTP ports 25/465/587 for free web services, so smtplib connections
+# to any SMTP host (Gmail included) get severed mid-handshake there. EMAIL_BACKEND
+# stays overridable via env var for anyone deploying somewhere SMTP isn't blocked.
 EMAIL_BACKEND = env(
     "EMAIL_BACKEND",
-    default="django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend",
+    default="django.core.mail.backends.console.EmailBackend" if DEBUG else "anymail.backends.brevo.EmailBackend",
 )
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="orders@ikart.local")
 EMAIL_HOST = env("EMAIL_HOST", default="")
@@ -117,6 +121,9 @@ EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=10)
+ANYMAIL = {
+    "BREVO_API_KEY": env("BREVO_API_KEY", default=""),
+}
 
 # Cloudinary media storage. Accepts either the single CLOUDINARY_URL
 # (cloudinary://API_KEY:API_SECRET@CLOUD_NAME) documented in render.yaml and
