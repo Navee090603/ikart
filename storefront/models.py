@@ -482,3 +482,15 @@ class SupportTicketReply(models.Model):
 
     class Meta:
         ordering = ["created_at"]
+
+
+class UserProfile(models.Model):
+    """Account-level fields that don't belong on Django's built-in User model.
+
+    Phone here is intentionally separate from Address.phone: this is the
+    account holder's own contact number, while an Address's phone is a
+    per-delivery contact (which may belong to someone else, e.g. a gift
+    recipient), so the two must not be conflated.
+    """
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+    phone = models.CharField(max_length=20, blank=True)

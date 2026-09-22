@@ -18,7 +18,7 @@ from .forms import ProductCSVUploadForm
 from .forms import CategoryCSVUploadForm
 from django.core.mail import send_mail
 
-from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, NotificationLog, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductImage, ProductQuestion, ProductVariant, Review, SavedForLaterItem, Shipment, ShipmentEvent, SupportTicket, SupportTicketReply, WishlistItem
+from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, NotificationLog, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductImage, ProductQuestion, ProductVariant, Review, SavedForLaterItem, Shipment, ShipmentEvent, SupportTicket, SupportTicketReply, UserProfile, WishlistItem
 from .services import fail_or_cancel_payment, notify_order_email, refund_captured_payment, restore_order_inventory
 
 logger = logging.getLogger(__name__)
@@ -914,3 +914,9 @@ class CategoryAdmin(admin.ModelAdmin):
                 "form":form
             }
         )
+
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ("user", "phone")
+    search_fields = ("user__username", "user__email", "phone")

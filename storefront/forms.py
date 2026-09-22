@@ -3,7 +3,7 @@ from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 
-from .models import Address, MarketingPreference, Order, OrderRequest, ProductQuestion, Review, SupportTicket
+from .models import Address, MarketingPreference, Order, OrderRequest, ProductQuestion, Review, SupportTicket, UserProfile
 
 
 class SignUpForm(UserCreationForm):
@@ -131,6 +131,13 @@ class MarketingPreferenceForm(forms.ModelForm):
     class Meta:
         model = MarketingPreference
         fields = ("email_promotions", "sms_promotions")
+
+
+class UserProfileForm(forms.ModelForm):
+    class Meta:
+        model = UserProfile
+        fields = ("phone",)
+        widgets = {"phone": forms.TextInput(attrs={"placeholder": "e.g. 9876543210"})}
 
 
 class ReviewForm(forms.ModelForm):
