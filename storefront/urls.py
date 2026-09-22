@@ -23,6 +23,7 @@ urlpatterns = [
     path("saved-for-later/", views.saved_for_later, name="saved_for_later"),
     path("saved-for-later/<int:item_id>/move/", views.move_saved_item_to_cart, name="move_saved_item_to_cart"),
     path("saved-for-later/<int:item_id>/remove/", views.remove_saved_item, name="remove_saved_item"),
+    path("account/", views.account, name="account"),
     path("addresses/", views.addresses, name="addresses"),
     path("addresses/<int:address_id>/edit/", views.edit_address, name="edit_address"),
     path("addresses/<int:address_id>/delete/", views.delete_address, name="delete_address"),

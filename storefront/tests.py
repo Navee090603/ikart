@@ -11,7 +11,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Address, Category, Coupon, CouponRedemption, Order, OrderItem, OrderRequest, PaymentTransaction, Product, ProductQuestion, Review, SavedForLaterItem, SupportTicket, WishlistItem
+from .models import Address, Category, Coupon, CouponRedemption, Order, OrderItem, OrderRequest, PaymentTransaction, Product, ProductQuestion, Review, SavedForLaterItem, SupportTicket, UserProfile, WishlistItem
 
 
 class ShoppingFlowTests(TestCase):
@@ -798,6 +798,36 @@ class ProductCSVImportAdminTests(TestCase):
         self.assertNotEqual(image.image.name, "https://example.com/mug.png")
         self.assertEqual(image.image.read(), b"fake-image-bytes")
         image.image.delete(save=False)
+
+
+class AccountPageTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("shopper", "shopper@example.com", "pass12345")
+        self.client.force_login(self.user)
+        self.url = reverse("storefront:account")
+
+    def test_requires_login(self):
+        self.client.logout()
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 302)
+
+    def test_get_creates_profile_and_shows_account_details(self):
+        self.assertFalse(UserProfile.objects.filter(user=self.user).exists())
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "shopper@example.com")
+        self.assertTrue(UserProfile.objects.filter(user=self.user).exists())
+
+    def test_post_updates_phone_number(self):
+        response = self.client.post(self.url, {"phone": "9876543210"}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        profile = UserProfile.objects.get(user=self.user)
+        self.assertEqual(profile.phone, "9876543210")
+
+    def test_password_change_view_renders(self):
+        response = self.client.get(reverse("password_change"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Change password")
 
 
 class HealthCheckTests(TestCase):
