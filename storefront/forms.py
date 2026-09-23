@@ -22,7 +22,11 @@ class SignUpForm(UserCreationForm):
         self.fields["username"].widget.attrs.update({"data-validate": "required"})
         self.fields["email"].widget.attrs.update({"data-validate": "required email"})
         self.fields["password1"].widget.attrs.update(
-            {**PASSWORD_WIDGET_ATTRS, "data-validate": "required minlength"}
+            {
+                **PASSWORD_WIDGET_ATTRS,
+                "data-validate": "required minlength notnumeric notcommon similarity",
+                "data-similarity-to": "id_username id_email",
+            }
         )
         self.fields["password2"].widget.attrs.update(
             {**PASSWORD_WIDGET_ATTRS, "data-validate": "required match", "data-matches": "id_password1"}
