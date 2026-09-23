@@ -30,7 +30,7 @@ from .forms import AddressForm, ChangePendingEmailForm, CheckoutForm, MarketingP
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductQuestion, ProductVariant, ProductView, Review, SavedForLaterItem, Shipment, SupportTicket, UserProfile, WishlistItem
 from .payments.razorpay_links import PaymentLinkError, cancel_payment_link, create_payment_link, verify_payment_link_signature
 from .ratelimit import rate_limit
-from .services import calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, restore_order_inventory
+from .services import build_order_tracking_steps, calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, restore_order_inventory
 from django.contrib.auth import views as auth_views
 
 logger = logging.getLogger(__name__)
@@ -885,15 +885,21 @@ def razorpay_webhook(request):
 
 
 def order_confirmation(request, number):
-    order = get_object_or_404(Order, number=number)
+    order = get_object_or_404(Order.objects.prefetch_related("items__product"), number=number)
     if not _can_access_order(request, order):
         raise Http404
-    return render(request, "storefront/order_confirmation.html", {"order": order, "shipment": getattr(order, "shipment", None), "requests": order.requests.all()})
+    return render(request, "storefront/order_confirmation.html", {
+        "order": order,
+        "shipment": getattr(order, "shipment", None),
+        "requests": order.requests.all(),
+        "tracking_steps": build_order_tracking_steps(order),
+    })
 
 
 @login_required
 def order_history(request):
-    return render(request, "storefront/order_history.html", {"orders": request.user.orders.prefetch_related("items", "requests")})
+    orders = request.user.orders.select_related("shipment").prefetch_related("items__product", "requests")
+    return render(request, "storefront/order_history.html", {"orders": orders})
 
 
 @login_required
@@ -1129,7 +1135,7 @@ def notification_preferences(request):
 
 @staff_member_required
 def analytics_dashboard(request):
-    completed_orders = Order.objects.filter(status__in=[Order.Status.PLACED, Order.Status.SHIPPED, Order.Status.DELIVERED])
+    completed_orders = Order.objects.filter(status__in=[Order.Status.PLACED, Order.Status.SHIPPED, Order.Status.OUT_FOR_DELIVERY, Order.Status.DELIVERED])
     totals = completed_orders.aggregate(revenue=Sum("total"), orders=Count("id"))
     top_products = (
         OrderItem.objects.filter(order__in=completed_orders)

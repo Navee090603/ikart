@@ -1,3 +1,40 @@
 {% extends 'storefront/base.html' %}
 {% block title %}Your orders | IKart{% endblock %}
-{% block content %}<div class="max-w-5xl mx-auto px-4 py-8"><h1 class="text-3xl font-bold">Your orders</h1><div class="space-y-4 mt-6">{% for order in orders %}<article class="bg-white rounded-xl p-5"><div class="flex flex-wrap justify-between gap-2"><div><a class="font-bold text-amber-700" href="{% url 'storefront:order_confirmation' order.number %}">{{ order.number }}</a><p class="text-sm text-slate-500">{{ order.created_at|date:'d M Y' }}</p></div><span class="capitalize bg-slate-100 rounded px-3 py-1 h-fit">{{ order.get_status_display }}</span></div><div class="text-sm mt-4">{% for item in order.items.all %}<div>{{ item.product_name }}{% if item.variant_label %} — {{ item.variant_label }}{% endif %} × {{ item.quantity }}</div>{% endfor %}</div><div class="font-bold mt-3">₹{{ order.total }}</div>{% if order.requests.all %}<p class="text-sm text-slate-500 mt-2">Request: {{ order.requests.all.0.get_request_type_display }} — {{ order.requests.all.0.get_status_display }}</p>{% endif %}</article>{% empty %}<div class="bg-white rounded-xl p-8">You have not placed an order yet. <a class="text-amber-700" href="{% url 'storefront:product_list' %}">Start shopping</a>.</div>{% endfor %}</div></div>{% endblock %}
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold">Your orders</h1>
+
+    <div class="space-y-4 mt-6">
+        {% for order in orders %}
+        <article class="bg-white rounded-xl p-5">
+            <div class="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                    <a class="font-bold text-amber-700 hover:underline" href="{% url 'storefront:order_confirmation' order.number %}">{{ order.number }}</a>
+                    <p class="text-sm text-slate-500">Placed {{ order.created_at|date:'d M Y' }}</p>
+                    {% if order.shipment.estimated_delivery %}<p class="text-sm text-slate-500">Arriving by {{ order.shipment.estimated_delivery|date:'d M' }}</p>{% endif %}
+                </div>
+
+                <span class="text-sm font-medium px-3 py-1 rounded-full h-fit {{ order.status_badge_class }}">{{ order.get_status_display }}</span>
+            </div>
+
+            <div class="flex gap-3 mt-4 overflow-x-auto">
+                {% for item in order.items.all %}
+                <div class="w-14 h-14 bg-slate-100 shrink-0 rounded overflow-hidden" title="{{ item.product_name }}{% if item.variant_label %} — {{ item.variant_label }}{% endif %} × {{ item.quantity }}">
+                    {% if item.product.image %}<img class="w-full h-full object-cover" src="{{ item.product.image.url }}" alt="{{ item.product_name }}">{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-3 mt-4">
+                <div class="font-bold">₹{{ order.total }}</div>
+                <a class="btn border text-sm" href="{% url 'storefront:order_confirmation' order.number %}">Track order</a>
+            </div>
+
+            {% if order.requests.all %}<p class="text-sm text-slate-500 mt-2">Request: {{ order.requests.all.0.get_request_type_display }} — {{ order.requests.all.0.get_status_display }}</p>{% endif %}
+        </article>
+        {% empty %}
+        <div class="bg-white rounded-xl p-8">You have not placed an order yet. <a class="text-amber-700" href="{% url 'storefront:product_list' %}">Start shopping</a>.</div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

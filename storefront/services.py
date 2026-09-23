@@ -31,6 +31,28 @@ class CartQuote:
         }
 
 
+ORDER_TRACKING_STEPS = [
+    (Order.Status.PLACED, "Order placed"),
+    (Order.Status.SHIPPED, "Shipped"),
+    (Order.Status.OUT_FOR_DELIVERY, "Out for delivery"),
+    (Order.Status.DELIVERED, "Delivered"),
+]
+
+
+def build_order_tracking_steps(order):
+    """The Placed -> Delivered progress steps for an order, or None if the
+    order isn't on that happy path (payment pending/failed, cancelled,
+    return, refunded) and needs a status message instead of a stepper."""
+    statuses = [status for status, _ in ORDER_TRACKING_STEPS]
+    if order.status not in statuses:
+        return None
+    current_index = statuses.index(order.status)
+    return [
+        {"label": label, "done": index <= current_index, "current": index == current_index}
+        for index, (status, label) in enumerate(ORDER_TRACKING_STEPS)
+    ]
+
+
 def calculate_cart_quote(cart, user=None, delivery_option=Order.DeliveryOption.STANDARD, coupon_code=""):
     """The only source of truth for cart, checkout, and payment amounts."""
     subtotal = cart.subtotal
