@@ -440,6 +440,17 @@ def _create_order_from_cart(form, cart, quote, checkout_token, payment_pending=F
         return order
 
 
+@require_GET
+@rate_limit("check_email_registered", limit=20, period_seconds=300)
+def check_email_registered(request):
+    """Lets checkout warn a guest who types an email that already has an
+    account: otherwise their order is created with user=None and never
+    shows up in that account's order history."""
+    email = request.GET.get("email", "").strip().lower()
+    registered = bool(email) and User.objects.filter(email__iexact=email).exists()
+    return JsonResponse({"registered": registered})
+
+
 @rate_limit("checkout", limit=30, period_seconds=300)
 def checkout(request):
     cart = Cart(request)

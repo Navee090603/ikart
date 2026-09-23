@@ -28,6 +28,7 @@ urlpatterns = [
     path("addresses/<int:address_id>/edit/", views.edit_address, name="edit_address"),
     path("addresses/<int:address_id>/delete/", views.delete_address, name="delete_address"),
     path("checkout/", views.checkout, name="checkout"),
+    path("checkout/check-email/", views.check_email_registered, name="check_email_registered"),
     path("payment/<str:number>/", views.payment_checkout, name="payment_checkout"),
     path("payment/<str:number>/return/", views.razorpay_payment_link_callback, name="razorpay_payment_link_callback"),
     path("payment/<str:number>/verify/", views.verify_razorpay_payment, name="verify_razorpay_payment"),

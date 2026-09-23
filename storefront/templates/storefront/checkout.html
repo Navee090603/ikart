@@ -34,6 +34,14 @@
                     <div id="{{ form.email.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.email.errors %} hidden{% endif %}">
                         {{ form.email.errors.0 }}
                     </div>
+
+                    {% if not user.is_authenticated %}
+                    <div id="email-registered-notice" class="hidden text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 mt-2">
+                        An account already exists with this email.
+                        <a class="font-semibold underline" href="{% url 'login' %}?next={% url 'storefront:checkout' %}">Sign in</a>
+                        to track this order and use your saved addresses.
+                    </div>
+                    {% endif %}
                 </div>
 
                 {% if form.saved_address %}
@@ -236,5 +244,16 @@ function syncAddressFields() {
 }
 document.querySelectorAll('input[name=saved_address]').forEach((radio) => radio.addEventListener('change', syncAddressFields));
 syncAddressFields();
+
+{% if not user.is_authenticated %}
+const emailNotice = document.getElementById('email-registered-notice');
+document.getElementById('id_email')?.addEventListener('blur', async (e) => {
+    const email = e.target.value.trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { emailNotice?.classList.add('hidden'); return; }
+    const r = await fetch('{% url "storefront:check_email_registered" %}?email=' + encodeURIComponent(email));
+    const d = await r.json();
+    emailNotice?.classList.toggle('hidden', !d.registered);
+});
+{% endif %}
 </script>
 {% endblock %}
