@@ -1,4 +1,5 @@
 {% extends 'storefront/base.html' %}
+{% load storefront_extras %}
 {% block title %}Your orders | IKart{% endblock %}
 {% block content %}
 <div class="max-w-5xl mx-auto px-4 py-8">
@@ -31,6 +32,46 @@
             </div>
 
             {% if order.requests.all %}<p class="text-sm text-slate-500 mt-2">Request: {{ order.requests.all.0.get_request_type_display }} — {{ order.requests.all.0.get_status_display }}</p>{% endif %}
+
+            {% if order.status == 'delivered' %}
+            <div class="border-t mt-4 pt-3 space-y-2">
+                {% for item in order.items.all %}
+                {% if item.product %}
+                <details class="text-sm">
+                    <summary class="text-amber-700 cursor-pointer">
+                        {% if item.product_id in existing_reviews %}Edit your review — {{ item.product_name }}{% else %}Rate & review — {{ item.product_name }}{% endif %}
+                    </summary>
+
+                    <form method="post" action="{% url 'storefront:add_review' item.product.slug %}" class="mt-3 space-y-2 max-w-sm">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{% url 'storefront:order_history' %}">
+
+                        {% with form=review_forms|dict_get:item.product_id %}
+                        <div>
+                            <label class="block font-medium mb-1" for="{{ form.rating.id_for_label }}">Rating</label>
+                            {{ form.rating }}
+                        </div>
+
+                        <div>
+                            <label class="block font-medium mb-1" for="{{ form.title.id_for_label }}">Title</label>
+                            {{ form.title }}
+                            {% for error in form.title.errors %}<p class="text-red-600 text-sm mt-1">{{ error }}</p>{% endfor %}
+                        </div>
+
+                        <div>
+                            <label class="block font-medium mb-1" for="{{ form.body.id_for_label }}">Review</label>
+                            {{ form.body }}
+                            {% for error in form.body.errors %}<p class="text-red-600 text-sm mt-1">{{ error }}</p>{% endfor %}
+                        </div>
+                        {% endwith %}
+
+                        <button class="btn btn-dark">{% if item.product_id in existing_reviews %}Update review{% else %}Submit review{% endif %}</button>
+                    </form>
+                </details>
+                {% endif %}
+                {% endfor %}
+            </div>
+            {% endif %}
         </article>
         {% empty %}
         <div class="bg-white rounded-xl p-8">You have not placed an order yet. <a class="text-amber-700" href="{% url 'storefront:product_list' %}">Start shopping</a>.</div>

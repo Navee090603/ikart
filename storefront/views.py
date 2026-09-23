@@ -22,6 +22,7 @@ from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
@@ -148,7 +149,6 @@ def product_detail(request, slug):
         request.session.create()
     ProductView.objects.create(product=product, user=request.user if request.user.is_authenticated else None, session_key=request.session.session_key)
     is_wishlisted = request.user.is_authenticated and WishlistItem.objects.filter(user=request.user, product=product).exists()
-    existing_review = product.reviews.filter(user=request.user).first() if request.user.is_authenticated else None
     purchased_user_ids = verified_purchaser_ids(product)
     # Verified-purchase reviews first, newest first within each group.
     reviews = sorted(
@@ -157,8 +157,8 @@ def product_detail(request, slug):
     )
     questions = [question for question in product.questions.all() if question.is_published]
     return render(request, "storefront/product_detail.html", {
-        "product": product, "review_form": ReviewForm(instance=existing_review), "question_form": ProductQuestionForm(),
-        "existing_review": existing_review, "reviews": reviews, "questions": questions,
+        "product": product, "question_form": ProductQuestionForm(),
+        "reviews": reviews, "questions": questions,
         "purchased_user_ids": purchased_user_ids, "has_purchased": request.user.id in purchased_user_ids,
         "is_wishlisted": is_wishlisted, "frequently_bought": frequently_bought_together(product),
         "also_viewed": customers_also_viewed(product),
@@ -908,8 +908,23 @@ def order_confirmation(request, number):
 
 @login_required
 def order_history(request):
-    orders = request.user.orders.select_related("shipment").prefetch_related("items__product", "requests")
-    return render(request, "storefront/order_history.html", {"orders": orders})
+    orders = list(request.user.orders.select_related("shipment").prefetch_related("items__product", "requests"))
+    reviewable_product_ids = {
+        item.product_id
+        for order in orders if order.status == Order.Status.DELIVERED
+        for item in order.items.all() if item.product_id
+    }
+    existing_reviews = {
+        review.product_id: review
+        for review in Review.objects.filter(user=request.user, product_id__in=reviewable_product_ids)
+    }
+    review_forms = {
+        product_id: ReviewForm(instance=existing_reviews.get(product_id), auto_id=f"id_review_{product_id}_%s")
+        for product_id in reviewable_product_ids
+    }
+    return render(request, "storefront/order_history.html", {
+        "orders": orders, "existing_reviews": existing_reviews, "review_forms": review_forms,
+    })
 
 
 @login_required
@@ -1078,6 +1093,9 @@ def add_review(request, slug):
         messages.success(request, "Thanks for reviewing this product.")
     else:
         messages.error(request, "Please provide a rating from 1 to 5 and complete the review fields.")
+    next_url = request.POST.get("next", "")
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        return redirect(next_url)
     return redirect(product.get_absolute_url())
 
 
