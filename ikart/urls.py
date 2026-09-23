@@ -5,7 +5,7 @@ from django.urls import include, path
 
 from django.contrib.auth import views as auth_views
 
-from storefront.forms import LoginForm
+from storefront.forms import ChangePasswordForm, LoginForm
 from storefront.ratelimit import rate_limit
 from storefront.views import health_check
 
@@ -22,6 +22,11 @@ urlpatterns = [
         "accounts/login/",
         rate_limit("login", limit=15, period_seconds=300)(auth_views.LoginView.as_view(authentication_form=LoginForm)),
         name="login",
+    ),
+    path(
+        "accounts/password_change/",
+        auth_views.PasswordChangeView.as_view(form_class=ChangePasswordForm),
+        name="password_change",
     ),
     path("accounts/", include("django.contrib.auth.urls")),
     path("", include("storefront.urls", namespace="storefront")),

@@ -1,5 +1,11 @@
 from django import forms
-from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
+from django.contrib.auth.forms import (
+    AuthenticationForm,
+    BaseUserCreationForm,
+    PasswordChangeForm,
+    SetPasswordForm,
+    UserCreationForm,
+)
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 
@@ -8,6 +14,11 @@ from .models import Address, MarketingPreference, Order, OrderRequest, ProductQu
 # Extra right padding so the show/hide password toggle button (added in the
 # template) doesn't sit on top of the password text as the user types.
 PASSWORD_WIDGET_ATTRS = {"class": "pr-12"}
+
+# Mirrors AUTH_PASSWORD_VALIDATORS (settings.py) so a new password gets the
+# same live client-side feedback wherever it's entered (signup, change
+# password) as it gets from the server on submit.
+NEW_PASSWORD_VALIDATE_RULE = "required minlength notnumeric notalpha special notcommon similarity"
 
 
 def _validate_email_not_registered(email):
@@ -31,7 +42,7 @@ class SignUpForm(UserCreationForm):
         self.fields["password1"].widget.attrs.update(
             {
                 **PASSWORD_WIDGET_ATTRS,
-                "data-validate": "required minlength notnumeric notalpha special notcommon similarity",
+                "data-validate": NEW_PASSWORD_VALIDATE_RULE,
                 "data-similarity-to": "id_username id_email",
             }
         )
@@ -42,6 +53,18 @@ class SignUpForm(UserCreationForm):
     def clean_email(self):
         return _validate_email_not_registered(self.cleaned_data["email"])
 
+    def _post_clean(self):
+        # BaseUserCreationForm._post_clean() builds self.instance (needed
+        # before password validators can check it, e.g. for the similarity
+        # check) and then runs AUTH_PASSWORD_VALIDATORS against "password2",
+        # attaching any failure there. That puts complexity errors like "too
+        # common" under "Confirm password" instead of "Password", which is
+        # misleading when JS is off or misses a rule the server catches. Skip
+        # straight to ModelForm's _post_clean (which builds self.instance)
+        # and re-run the password check ourselves targeting password1.
+        super(BaseUserCreationForm, self)._post_clean()
+        self.validate_password_for_user(self.instance, "password1")
+
 
 class LoginForm(AuthenticationForm):
     def __init__(self, *args, **kwargs):
@@ -50,6 +73,35 @@ class LoginForm(AuthenticationForm):
         self.fields["password"].widget.attrs.update(
             {**PASSWORD_WIDGET_ATTRS, "data-validate": "required"}
         )
+
+
+class ChangePasswordForm(PasswordChangeForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["old_password"].widget.attrs.update(
+            {**PASSWORD_WIDGET_ATTRS, "data-validate": "required"}
+        )
+        self.fields["new_password1"].widget.attrs.update(
+            {
+                **PASSWORD_WIDGET_ATTRS,
+                "data-validate": NEW_PASSWORD_VALIDATE_RULE,
+                "data-similarity-to": "id_username id_email",
+            }
+        )
+        self.fields["new_password2"].widget.attrs.update(
+            {**PASSWORD_WIDGET_ATTRS, "data-validate": "required match", "data-matches": "id_new_password1"}
+        )
+
+    def clean(self):
+        # SetPasswordForm.clean() runs AUTH_PASSWORD_VALIDATORS against
+        # "new_password2", attaching any failure there ("Confirm new
+        # password") instead of "New password". Same fix as
+        # SignUpForm._post_clean(): reuse Django's own validation helpers,
+        # just targeting new_password1, and skip SetPasswordForm.clean()
+        # itself so it doesn't also run the check against new_password2.
+        self.validate_passwords("new_password1", "new_password2")
+        self.validate_password_for_user(self.user, "new_password1")
+        return super(SetPasswordForm, self).clean()
 
 
 class OTPVerificationForm(forms.Form):
