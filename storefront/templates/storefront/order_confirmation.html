@@ -2,7 +2,13 @@
 {% block title %}Order {{ order.number }} | IKart{% endblock %}
 {% block content %}
 <div class="max-w-3xl mx-auto px-4 py-10">
-    <div class="bg-white rounded-xl p-6 sm:p-8">
+    {% if user.is_authenticated and order.user == user %}
+    <a class="text-sm text-amber-700 hover:underline" href="{% url 'storefront:order_history' %}">&larr; Back to your orders</a>
+    {% else %}
+    <a class="text-sm text-amber-700 hover:underline" href="{% url 'storefront:product_list' %}">&larr; Continue shopping</a>
+    {% endif %}
+
+    <div class="bg-white rounded-xl p-6 sm:p-8 mt-3">
 
         <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
