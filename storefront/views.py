@@ -30,7 +30,7 @@ from .forms import AddressForm, ChangePendingEmailForm, CheckoutForm, MarketingP
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductQuestion, ProductVariant, ProductView, Review, SavedForLaterItem, Shipment, SupportTicket, UserProfile, WishlistItem
 from .payments.razorpay_links import PaymentLinkError, cancel_payment_link, create_payment_link, verify_payment_link_signature
 from .ratelimit import rate_limit
-from .services import build_order_tracking_steps, calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, restore_order_inventory
+from .services import build_order_tracking_steps, calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, restore_order_inventory, verified_purchaser_ids
 from django.contrib.auth import views as auth_views
 
 logger = logging.getLogger(__name__)
@@ -149,9 +149,17 @@ def product_detail(request, slug):
     ProductView.objects.create(product=product, user=request.user if request.user.is_authenticated else None, session_key=request.session.session_key)
     is_wishlisted = request.user.is_authenticated and WishlistItem.objects.filter(user=request.user, product=product).exists()
     existing_review = product.reviews.filter(user=request.user).first() if request.user.is_authenticated else None
+    purchased_user_ids = verified_purchaser_ids(product)
+    # Verified-purchase reviews first, newest first within each group.
+    reviews = sorted(
+        (review for review in product.reviews.all() if review.is_approved),
+        key=lambda review: (review.user_id not in purchased_user_ids, -review.created_at.timestamp()),
+    )
+    questions = [question for question in product.questions.all() if question.is_published]
     return render(request, "storefront/product_detail.html", {
         "product": product, "review_form": ReviewForm(instance=existing_review), "question_form": ProductQuestionForm(),
-        "existing_review": existing_review,
+        "existing_review": existing_review, "reviews": reviews, "questions": questions,
+        "purchased_user_ids": purchased_user_ids, "has_purchased": request.user.id in purchased_user_ids,
         "is_wishlisted": is_wishlisted, "frequently_bought": frequently_bought_together(product),
         "also_viewed": customers_also_viewed(product),
     })

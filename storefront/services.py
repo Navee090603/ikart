@@ -270,6 +270,24 @@ def frequently_bought_together(product, limit=4):
     return Product.objects.filter(id__in=ids, is_active=True).order_by(ordering)
 
 
+# Orders in these states never resulted in the buyer actually keeping the
+# item (payment never went through, or the order was cancelled outright),
+# so they shouldn't count toward a "Verified Purchase" badge. Everything
+# else - including a completed return/refund - still means the badge holder
+# genuinely bought and received the product at some point.
+PURCHASE_VOIDING_STATUSES = {Order.Status.PAYMENT_PENDING, Order.Status.PAYMENT_FAILED, Order.Status.CANCELLED}
+
+
+def verified_purchaser_ids(product):
+    """User IDs eligible for a "Verified Purchase" badge on their review of
+    this product: they have a real (non-voided) order containing it."""
+    return set(
+        OrderItem.objects.filter(product=product, order__user__isnull=False)
+        .exclude(order__status__in=PURCHASE_VOIDING_STATUSES)
+        .values_list("order__user_id", flat=True)
+    )
+
+
 def customers_also_viewed(product, limit=4):
     sessions = ProductView.objects.filter(product=product).exclude(session_key="").values("session_key")
     viewed = (
