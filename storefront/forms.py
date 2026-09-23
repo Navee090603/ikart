@@ -1,9 +1,13 @@
 from django import forms
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 
 from .models import Address, MarketingPreference, Order, OrderRequest, ProductQuestion, Review, SupportTicket, UserProfile
+
+# Extra right padding so the show/hide password toggle button (added in the
+# template) doesn't sit on top of the password text as the user types.
+PASSWORD_WIDGET_ATTRS = {"class": "pr-12"}
 
 
 class SignUpForm(UserCreationForm):
@@ -13,11 +17,22 @@ class SignUpForm(UserCreationForm):
         model = User
         fields = ("username", "email", "password1", "password2")
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["password1"].widget.attrs.update(PASSWORD_WIDGET_ATTRS)
+        self.fields["password2"].widget.attrs.update(PASSWORD_WIDGET_ATTRS)
+
     def clean_email(self):
         email = self.cleaned_data["email"].strip().lower()
         if User.objects.filter(email__iexact=email).exists():
             raise ValidationError("An account already uses this email address. Please sign in instead.")
         return email
+
+
+class LoginForm(AuthenticationForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["password"].widget.attrs.update(PASSWORD_WIDGET_ATTRS)
 
 
 class OTPVerificationForm(forms.Form):
