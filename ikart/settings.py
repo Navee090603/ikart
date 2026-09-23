@@ -88,6 +88,8 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+    {"NAME": "storefront.password_validators.NotAllAlphabeticValidator"},
+    {"NAME": "storefront.password_validators.SpecialCharacterValidator"},
 ]
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Asia/Kolkata"

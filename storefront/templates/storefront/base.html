@@ -67,6 +67,8 @@
       email: (value) => value === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value),
       minlength: (value) => value === '' || value.length >= 8,
       notnumeric: (value) => value === '' || !/^\d+$/.test(value),
+      notalpha: (value) => value === '' || !/^[A-Za-z]+$/.test(value),
+      special: (value) => value === '' || /[^A-Za-z0-9]/.test(value),
       notcommon: (value) => value === '' || commonPasswords === null || !commonPasswords.has(value.toLowerCase()),
     };
     const messages = {
@@ -75,6 +77,8 @@
       minlength: 'Must be at least 8 characters.',
       match: 'Passwords do not match.',
       notnumeric: "This password can't be entirely numeric.",
+      notalpha: "This password can't contain only letters.",
+      special: 'This password must contain at least one special character.',
       notcommon: 'This password is too common.',
       similarity: 'This password is too similar to your other information.',
     };

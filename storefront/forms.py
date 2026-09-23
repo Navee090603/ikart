@@ -24,7 +24,7 @@ class SignUpForm(UserCreationForm):
         self.fields["password1"].widget.attrs.update(
             {
                 **PASSWORD_WIDGET_ATTRS,
-                "data-validate": "required minlength notnumeric notcommon similarity",
+                "data-validate": "required minlength notnumeric notalpha special notcommon similarity",
                 "data-similarity-to": "id_username id_email",
             }
         )
