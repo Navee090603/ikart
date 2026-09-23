@@ -1,3 +1,4 @@
+{% load static %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -18,5 +19,118 @@
   {% if messages %}<div class="max-w-7xl mx-auto px-4 pt-4">{% for message in messages %}<div class="p-3 mb-2 rounded bg-amber-100">{{ message }}</div>{% endfor %}</div>{% endif %}
   <main>{% block content %}{% endblock %}</main>
   <footer class="bg-slate-900 text-slate-300 mt-14"><div class="max-w-7xl mx-auto px-4 py-9 grid gap-6 md:grid-cols-3"><div><div class="text-xl font-bold text-white">IKart</div><p class="mt-2 text-sm">Everyday shopping, made straightforward.</p></div><div><div class="font-semibold text-white">Customer care</div><a class="block mt-2 text-sm" href="{% url 'storefront:trust_page' 'returns' %}">Returns & refunds</a><a class="block mt-2 text-sm" href="{% url 'storefront:order_history' %}">Track your order</a><a class="block mt-2 text-sm" href="{% url 'storefront:support' %}">Help & support</a></div><div><div class="font-semibold text-white">Trust & legal</div><a class="block mt-2 text-sm" href="{% url 'storefront:trust_page' 'privacy' %}">Privacy policy</a><a class="block mt-2 text-sm" href="{% url 'storefront:trust_page' 'terms' %}">Terms of service</a><p class="text-sm mt-2">Secure, SSL-encrypted checkout</p></div></div></footer>
-  <script>const input=document.getElementById('site-search'),box=document.getElementById('search-results'),escapeHtml=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));let timer;input?.addEventListener('input',()=>{clearTimeout(timer);const q=input.value.trim();if(q.length<2){box.classList.add('hidden');return}timer=setTimeout(async()=>{const r=await fetch('{% url "storefront:search_autocomplete" %}?q='+encodeURIComponent(q));const d=await r.json();box.innerHTML=d.results.map(x=>`<a class="block px-3 py-2 hover:bg-slate-100" href="/product/${encodeURIComponent(x.slug)}/">${escapeHtml(x.name)}<span class="float-right">₹${escapeHtml(x.price)}</span></a>`).join('');box.classList.toggle('hidden',!d.results.length)},180)});document.addEventListener('click',e=>{if(!e.target.closest('#site-search')&&!e.target.closest('#search-results'))box.classList.add('hidden')});const accountMenu=document.getElementById('account-menu');document.addEventListener('click',e=>{if(accountMenu&&accountMenu.open&&!e.target.closest('#account-menu'))accountMenu.removeAttribute('open')});</script>
+  <script>const input=document.getElementById('site-search'),box=document.getElementById('search-results'),escapeHtml=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));let timer;input?.addEventListener('input',()=>{clearTimeout(timer);const q=input.value.trim();if(q.length<2){box.classList.add('hidden');return}timer=setTimeout(async()=>{const r=await fetch('{% url "storefront:search_autocomplete" %}?q='+encodeURIComponent(q));const d=await r.json();box.innerHTML=d.results.map(x=>`<a class="block px-3 py-2 hover:bg-slate-100" href="/product/${encodeURIComponent(x.slug)}/">${escapeHtml(x.name)}<span class="float-right">₹${escapeHtml(x.price)}</span></a>`).join('');box.classList.toggle('hidden',!d.results.length)},180)});document.addEventListener('click',e=>{if(!e.target.closest('#site-search')&&!e.target.closest('#search-results'))box.classList.add('hidden')});const accountMenu=document.getElementById('account-menu');document.addEventListener('click',e=>{if(accountMenu&&accountMenu.open&&!e.target.closest('#account-menu'))accountMenu.removeAttribute('open')});document.addEventListener('click',e=>{const btn=e.target.closest('.pw-toggle');if(!btn)return;const input=document.getElementById(btn.dataset.target);if(!input)return;const showing=input.type==='text';input.type=showing?'password':'text';btn.textContent=showing?'Show':'Hide'});</script>
+  <script>
+  (function () {
+    // Common-password list mirrors Django's CommonPasswordValidator so the
+    // client-side check flags the same passwords the server would reject.
+    let commonPasswords = null;
+    const commonPasswordFields = document.querySelectorAll('[data-validate~="notcommon"]');
+    if (commonPasswordFields.length) {
+      fetch('{% static "storefront/common-passwords.txt" %}')
+        .then((response) => response.text())
+        .then((text) => {
+          commonPasswords = new Set(text.split('\n').map((word) => word.trim()).filter(Boolean));
+          commonPasswordFields.forEach((input) => { if (input.dataset.touched) showError(input); });
+        })
+        .catch(() => {});
+    }
+
+    // Port of Python difflib.SequenceMatcher.quick_ratio(): a fast
+    // character-multiset similarity score, same one Django's
+    // UserAttributeSimilarityValidator uses under the hood.
+    function quickRatio(a, b) {
+      if (!a.length && !b.length) return 1;
+      const countB = {};
+      for (const ch of b) countB[ch] = (countB[ch] || 0) + 1;
+      const avail = {};
+      let matches = 0;
+      for (const ch of a) {
+        const n = ch in avail ? avail[ch] : (countB[ch] || 0);
+        avail[ch] = n - 1;
+        if (n > 0) matches++;
+      }
+      const length = a.length + b.length;
+      return length ? (2 * matches) / length : 1;
+    }
+
+    function tooSimilar(password, otherValue) {
+      if (!otherValue) return false;
+      const passwordLower = password.toLowerCase();
+      const otherLower = otherValue.toLowerCase();
+      const parts = otherLower.split(/\W+/).concat(otherLower);
+      return parts.some((part) => quickRatio(passwordLower, part) >= 0.7);
+    }
+
+    const validators = {
+      required: (value) => value.trim() !== '',
+      email: (value) => value === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value),
+      minlength: (value) => value === '' || value.length >= 8,
+      notnumeric: (value) => value === '' || !/^\d+$/.test(value),
+      notalpha: (value) => value === '' || !/^[A-Za-z]+$/.test(value),
+      special: (value) => value === '' || /[^A-Za-z0-9]/.test(value),
+      notcommon: (value) => value === '' || commonPasswords === null || !commonPasswords.has(value.toLowerCase()),
+    };
+    const messages = {
+      required: 'This field is required.',
+      email: 'Enter a valid email address.',
+      minlength: 'Must be at least 8 characters.',
+      match: 'Passwords do not match.',
+      notnumeric: "This password can't be entirely numeric.",
+      notalpha: "This password can't contain only letters.",
+      special: 'This password must contain at least one special character.',
+      notcommon: 'This password is too common.',
+      similarity: 'This password is too similar to your other information.',
+    };
+
+    function validate(input) {
+      const rules = (input.dataset.validate || '').split(/\s+/).filter(Boolean);
+      for (const rule of rules) {
+        if (rule === 'match') {
+          const other = document.getElementById(input.dataset.matches);
+          if (other && input.value !== '' && input.value !== other.value) return messages.match;
+          continue;
+        }
+        if (rule === 'similarity') {
+          if (input.value !== '') {
+            const ids = (input.dataset.similarityTo || '').split(/\s+/).filter(Boolean);
+            for (const id of ids) {
+              const other = document.getElementById(id);
+              if (other && tooSimilar(input.value, other.value)) return messages.similarity;
+            }
+          }
+          continue;
+        }
+        if (validators[rule] && !validators[rule](input.value)) return messages[rule];
+      }
+      return '';
+    }
+
+    function showError(input) {
+      const error = document.getElementById(input.id + '-error');
+      if (!error) return;
+      const message = validate(input);
+      error.textContent = message;
+      error.classList.toggle('hidden', !message);
+    }
+
+    document.querySelectorAll('form[data-live-validate] [data-validate]').forEach((input) => {
+      const dependsOn = [];
+      if (input.dataset.matches) dependsOn.push(input.dataset.matches);
+      if (input.dataset.similarityTo) dependsOn.push(...input.dataset.similarityTo.split(/\s+/));
+      dependsOn.forEach((id) => {
+        const other = document.getElementById(id);
+        if (other) other.addEventListener('input', () => { if (input.dataset.touched) showError(input); });
+      });
+
+      input.addEventListener('blur', () => {
+        input.dataset.touched = 'true';
+        showError(input);
+      });
+      input.addEventListener('input', () => {
+        if (input.dataset.touched) showError(input);
+      });
+    });
+  })();
+  </script>
 </body></html>
