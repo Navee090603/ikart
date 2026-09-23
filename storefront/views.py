@@ -26,7 +26,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .cart import Cart
-from .forms import AddressForm, CheckoutForm, MarketingPreferenceForm, OrderRequestForm, OTPVerificationForm, ProductQuestionForm, ReviewForm, SignUpForm, SupportTicketForm, UserProfileForm
+from .forms import AddressForm, ChangePendingEmailForm, CheckoutForm, MarketingPreferenceForm, OrderRequestForm, OTPVerificationForm, ProductQuestionForm, ReviewForm, SignUpForm, SupportTicketForm, UserProfileForm
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductQuestion, ProductVariant, ProductView, Review, SavedForLaterItem, Shipment, SupportTicket, UserProfile, WishlistItem
 from .payments.razorpay_links import PaymentLinkError, cancel_payment_link, create_payment_link, verify_payment_link_signature
 from .ratelimit import rate_limit
@@ -985,7 +985,9 @@ def verify_email(request):
                 form.add_error("code", "That code is not correct.")
     else:
         form = OTPVerificationForm()
-    return render(request, "registration/verify_email.html", {"form": form, "email": pending["email"]})
+    return render(request, "registration/verify_email.html", {
+        "form": form, "email": pending["email"], "email_form": ChangePendingEmailForm(),
+    })
 
 
 @require_POST
@@ -1008,6 +1010,34 @@ def resend_verification_code(request):
     pending.update({"code_hash": code_hash, "expires_at": expires_at.isoformat(), "attempts": 0, "last_sent_at": timezone.now().isoformat()})
     request.session["pending_registration"] = pending
     messages.success(request, "A new verification code has been sent.")
+    return redirect("storefront:verify_email")
+
+
+@require_POST
+@rate_limit("change_pending_email", limit=5, period_seconds=600)
+def change_pending_email(request):
+    pending = request.session.get("pending_registration")
+    if not pending:
+        messages.info(request, "Start by creating your account.")
+        return redirect("storefront:signup")
+    email_form = ChangePendingEmailForm(request.POST)
+    if not email_form.is_valid():
+        return render(request, "registration/verify_email.html", {
+            "form": OTPVerificationForm(), "email": pending["email"], "email_form": email_form,
+        })
+    new_email = email_form.cleaned_data["email"]
+    try:
+        code_hash, expires_at = _send_verification_code(new_email)
+    except Exception:
+        logger.exception("Failed to send verification email to %s", new_email)
+        messages.error(request, "We could not send a verification email to that address. Please try again.")
+        return redirect("storefront:verify_email")
+    pending.update({
+        "email": new_email, "code_hash": code_hash, "expires_at": expires_at.isoformat(),
+        "attempts": 0, "last_sent_at": timezone.now().isoformat(),
+    })
+    request.session["pending_registration"] = pending
+    messages.success(request, "Your email has been updated. Check your inbox for the new code.")
     return redirect("storefront:verify_email")
 
 

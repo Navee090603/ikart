@@ -10,6 +10,13 @@ from .models import Address, MarketingPreference, Order, OrderRequest, ProductQu
 PASSWORD_WIDGET_ATTRS = {"class": "pr-12"}
 
 
+def _validate_email_not_registered(email):
+    email = email.strip().lower()
+    if User.objects.filter(email__iexact=email).exists():
+        raise ValidationError("An account already uses this email address. Please sign in instead.")
+    return email
+
+
 class SignUpForm(UserCreationForm):
     email = forms.EmailField(required=True)
 
@@ -33,10 +40,7 @@ class SignUpForm(UserCreationForm):
         )
 
     def clean_email(self):
-        email = self.cleaned_data["email"].strip().lower()
-        if User.objects.filter(email__iexact=email).exists():
-            raise ValidationError("An account already uses this email address. Please sign in instead.")
-        return email
+        return _validate_email_not_registered(self.cleaned_data["email"])
 
 
 class LoginForm(AuthenticationForm):
@@ -59,6 +63,15 @@ class OTPVerificationForm(forms.Form):
         if not code.isdigit() or len(code) != 6:
             raise ValidationError("Enter the six-digit code from your email.")
         return code
+
+
+class ChangePendingEmailForm(forms.Form):
+    email = forms.EmailField(
+        label="New email", widget=forms.EmailInput(attrs={"data-validate": "required email"})
+    )
+
+    def clean_email(self):
+        return _validate_email_not_registered(self.cleaned_data["email"])
 
 
 class CheckoutForm(forms.ModelForm):

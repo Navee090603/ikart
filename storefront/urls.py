@@ -40,6 +40,7 @@ urlpatterns = [
     path("signup/", views.signup, name="signup"),
     path("verify-email/", views.verify_email, name="verify_email"),
     path("verify-email/resend/", views.resend_verification_code, name="resend_verification_code"),
+    path("verify-email/change-email/", views.change_pending_email, name="change_pending_email"),
     path("product/<slug:slug>/review/", views.add_review, name="add_review"),
     path("product/<slug:slug>/question/", views.add_product_question, name="add_product_question"),
     path("support/", views.support_center, name="support"),
