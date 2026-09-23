@@ -148,8 +148,10 @@ def product_detail(request, slug):
         request.session.create()
     ProductView.objects.create(product=product, user=request.user if request.user.is_authenticated else None, session_key=request.session.session_key)
     is_wishlisted = request.user.is_authenticated and WishlistItem.objects.filter(user=request.user, product=product).exists()
+    existing_review = product.reviews.filter(user=request.user).first() if request.user.is_authenticated else None
     return render(request, "storefront/product_detail.html", {
-        "product": product, "review_form": ReviewForm(), "question_form": ProductQuestionForm(),
+        "product": product, "review_form": ReviewForm(instance=existing_review), "question_form": ProductQuestionForm(),
+        "existing_review": existing_review,
         "is_wishlisted": is_wishlisted, "frequently_bought": frequently_bought_together(product),
         "also_viewed": customers_also_viewed(product),
     })
