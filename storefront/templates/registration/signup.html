@@ -32,10 +32,6 @@
 
                 {{ form.username }}
 
-                {% if form.username.help_text %}
-                <p class="text-xs text-gray-500 mt-1">{{ form.username.help_text }}</p>
-                {% endif %}
-
                 <div id="{{ form.username.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.username.errors %} hidden{% endif %}">
                     {{ form.username.errors.0 }}
                 </div>
@@ -65,10 +61,6 @@
                         Show
                     </button>
                 </div>
-
-                {% if form.password1.help_text %}
-                <div class="text-xs text-gray-500 mt-1 space-y-0.5">{{ form.password1.help_text|safe }}</div>
-                {% endif %}
 
                 <div id="{{ form.password1.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.password1.errors %} hidden{% endif %}">
                     {{ form.password1.errors.0 }}
