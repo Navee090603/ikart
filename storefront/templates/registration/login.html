@@ -16,7 +16,7 @@
             </p>
         </div>
 
-        <form method="post" class="space-y-4">
+        <form method="post" class="space-y-4" novalidate data-live-validate>
             {% csrf_token %}
 
             {% if form.non_field_errors %}
@@ -32,11 +32,9 @@
 
                 {{ form.username }}
 
-                {% if form.username.errors %}
-                <div class="text-sm text-red-600 mt-1">
-                    {{ form.username.errors }}
+                <div id="{{ form.username.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.username.errors %} hidden{% endif %}">
+                    {{ form.username.errors.0 }}
                 </div>
-                {% endif %}
             </div>
 
             <div>
@@ -58,11 +56,9 @@
                     </button>
                 </div>
 
-                {% if form.password.errors %}
-                <div class="text-sm text-red-600 mt-1">
-                    {{ form.password.errors }}
+                <div id="{{ form.password.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.password.errors %} hidden{% endif %}">
+                    {{ form.password.errors.0 }}
                 </div>
-                {% endif %}
             </div>
 
             <button type="submit" class="btn btn-primary w-full">

@@ -16,7 +16,7 @@
             </p>
         </div>
 
-        <form method="post" class="space-y-4">
+        <form method="post" class="space-y-4" novalidate data-live-validate>
             {% csrf_token %}
 
             {% if form.non_field_errors %}
@@ -36,11 +36,9 @@
                 <p class="text-xs text-gray-500 mt-1">{{ form.username.help_text }}</p>
                 {% endif %}
 
-                {% if form.username.errors %}
-                <div class="text-sm text-red-600 mt-1">
-                    {{ form.username.errors }}
+                <div id="{{ form.username.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.username.errors %} hidden{% endif %}">
+                    {{ form.username.errors.0 }}
                 </div>
-                {% endif %}
             </div>
 
             <div>
@@ -50,11 +48,9 @@
 
                 {{ form.email }}
 
-                {% if form.email.errors %}
-                <div class="text-sm text-red-600 mt-1">
-                    {{ form.email.errors }}
+                <div id="{{ form.email.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.email.errors %} hidden{% endif %}">
+                    {{ form.email.errors.0 }}
                 </div>
-                {% endif %}
             </div>
 
             <div>
@@ -74,11 +70,9 @@
                 <div class="text-xs text-gray-500 mt-1 space-y-0.5">{{ form.password1.help_text|safe }}</div>
                 {% endif %}
 
-                {% if form.password1.errors %}
-                <div class="text-sm text-red-600 mt-1">
-                    {{ form.password1.errors }}
+                <div id="{{ form.password1.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.password1.errors %} hidden{% endif %}">
+                    {{ form.password1.errors.0 }}
                 </div>
-                {% endif %}
             </div>
 
             <div>
@@ -94,11 +88,9 @@
                     </button>
                 </div>
 
-                {% if form.password2.errors %}
-                <div class="text-sm text-red-600 mt-1">
-                    {{ form.password2.errors }}
+                <div id="{{ form.password2.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.password2.errors %} hidden{% endif %}">
+                    {{ form.password2.errors.0 }}
                 </div>
-                {% endif %}
             </div>
 
             <button type="submit" class="btn btn-primary w-full">

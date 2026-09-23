@@ -19,8 +19,14 @@ class SignUpForm(UserCreationForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["password1"].widget.attrs.update(PASSWORD_WIDGET_ATTRS)
-        self.fields["password2"].widget.attrs.update(PASSWORD_WIDGET_ATTRS)
+        self.fields["username"].widget.attrs.update({"data-validate": "required"})
+        self.fields["email"].widget.attrs.update({"data-validate": "required email"})
+        self.fields["password1"].widget.attrs.update(
+            {**PASSWORD_WIDGET_ATTRS, "data-validate": "required minlength"}
+        )
+        self.fields["password2"].widget.attrs.update(
+            {**PASSWORD_WIDGET_ATTRS, "data-validate": "required match", "data-matches": "id_password1"}
+        )
 
     def clean_email(self):
         email = self.cleaned_data["email"].strip().lower()
@@ -32,7 +38,10 @@ class SignUpForm(UserCreationForm):
 class LoginForm(AuthenticationForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["password"].widget.attrs.update(PASSWORD_WIDGET_ATTRS)
+        self.fields["username"].widget.attrs.update({"data-validate": "required"})
+        self.fields["password"].widget.attrs.update(
+            {**PASSWORD_WIDGET_ATTRS, "data-validate": "required"}
+        )
 
 
 class OTPVerificationForm(forms.Form):

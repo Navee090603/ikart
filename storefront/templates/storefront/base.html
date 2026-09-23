@@ -19,4 +19,53 @@
   <main>{% block content %}{% endblock %}</main>
   <footer class="bg-slate-900 text-slate-300 mt-14"><div class="max-w-7xl mx-auto px-4 py-9 grid gap-6 md:grid-cols-3"><div><div class="text-xl font-bold text-white">IKart</div><p class="mt-2 text-sm">Everyday shopping, made straightforward.</p></div><div><div class="font-semibold text-white">Customer care</div><a class="block mt-2 text-sm" href="{% url 'storefront:trust_page' 'returns' %}">Returns & refunds</a><a class="block mt-2 text-sm" href="{% url 'storefront:order_history' %}">Track your order</a><a class="block mt-2 text-sm" href="{% url 'storefront:support' %}">Help & support</a></div><div><div class="font-semibold text-white">Trust & legal</div><a class="block mt-2 text-sm" href="{% url 'storefront:trust_page' 'privacy' %}">Privacy policy</a><a class="block mt-2 text-sm" href="{% url 'storefront:trust_page' 'terms' %}">Terms of service</a><p class="text-sm mt-2">Secure, SSL-encrypted checkout</p></div></div></footer>
   <script>const input=document.getElementById('site-search'),box=document.getElementById('search-results'),escapeHtml=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));let timer;input?.addEventListener('input',()=>{clearTimeout(timer);const q=input.value.trim();if(q.length<2){box.classList.add('hidden');return}timer=setTimeout(async()=>{const r=await fetch('{% url "storefront:search_autocomplete" %}?q='+encodeURIComponent(q));const d=await r.json();box.innerHTML=d.results.map(x=>`<a class="block px-3 py-2 hover:bg-slate-100" href="/product/${encodeURIComponent(x.slug)}/">${escapeHtml(x.name)}<span class="float-right">₹${escapeHtml(x.price)}</span></a>`).join('');box.classList.toggle('hidden',!d.results.length)},180)});document.addEventListener('click',e=>{if(!e.target.closest('#site-search')&&!e.target.closest('#search-results'))box.classList.add('hidden')});const accountMenu=document.getElementById('account-menu');document.addEventListener('click',e=>{if(accountMenu&&accountMenu.open&&!e.target.closest('#account-menu'))accountMenu.removeAttribute('open')});document.addEventListener('click',e=>{const btn=e.target.closest('.pw-toggle');if(!btn)return;const input=document.getElementById(btn.dataset.target);if(!input)return;const showing=input.type==='text';input.type=showing?'password':'text';btn.textContent=showing?'Show':'Hide'});</script>
+  <script>
+  (function () {
+    const validators = {
+      required: (value) => value.trim() !== '',
+      email: (value) => value === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value),
+      minlength: (value) => value === '' || value.length >= 8,
+    };
+    const messages = {
+      required: 'This field is required.',
+      email: 'Enter a valid email address.',
+      minlength: 'Must be at least 8 characters.',
+      match: 'Passwords do not match.',
+    };
+
+    function validate(input) {
+      const rules = (input.dataset.validate || '').split(/\s+/).filter(Boolean);
+      for (const rule of rules) {
+        if (rule === 'match') {
+          const other = document.getElementById(input.dataset.matches);
+          if (other && input.value !== '' && input.value !== other.value) return messages.match;
+          continue;
+        }
+        if (validators[rule] && !validators[rule](input.value)) return messages[rule];
+      }
+      return '';
+    }
+
+    function showError(input) {
+      const error = document.getElementById(input.id + '-error');
+      if (!error) return;
+      const message = validate(input);
+      error.textContent = message;
+      error.classList.toggle('hidden', !message);
+    }
+
+    document.querySelectorAll('form[data-live-validate] [data-validate]').forEach((input) => {
+      input.addEventListener('blur', () => {
+        input.dataset.touched = 'true';
+        showError(input);
+      });
+      input.addEventListener('input', () => {
+        if (input.dataset.touched) showError(input);
+        document.querySelectorAll(`[data-matches="${input.id}"]`).forEach((dependent) => {
+          if (dependent.dataset.touched) showError(dependent);
+        });
+      });
+    });
+  })();
+  </script>
 </body></html>
