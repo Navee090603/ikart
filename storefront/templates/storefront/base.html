@@ -6,7 +6,113 @@
   <title>{% block title %}IKart{% endblock %}</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23f59e0b'/%3E%3Cpath fill='%230f172a' d='M22 12h9v17l13-17h11L39 32l17 20H44L31 36v16h-9z'/%3E%3C/svg%3E">
   <script src="https://cdn.tailwindcss.com"></script>
-  <style>body{background:#f6f7f9}.product-image{aspect-ratio:1/1;object-fit:cover}.form-input,input,textarea,select{width:100%;border:1px solid #d1d5db;border-radius:.5rem;padding:.65rem}.btn{border-radius:.5rem;padding:.65rem 1rem;font-weight:600;display:inline-block}.btn-primary{background:#f59e0b;color:#111827}.btn-primary:hover{background:#d97706}.btn-dark{background:#111827;color:white}.star{color:#f59e0b}.search-results{position:absolute;top:100%;left:0;right:0;background:white;color:#0f172a;border-radius:0 0 .5rem .5rem;overflow:hidden;z-index:30}.account-menu summary{list-style:none;cursor:pointer}.account-menu summary::-webkit-details-marker{display:none}.account-menu[open] summary{color:#fbbf24}.account-dropdown{position:absolute;top:100%;right:0;margin-top:.5rem;width:14rem;background:white;color:#0f172a;border-radius:.5rem;overflow:hidden;z-index:30;box-shadow:0 10px 25px rgba(0,0,0,.15)}.option-card{display:flex;gap:.75rem;border:1px solid #d1d5db;border-radius:.5rem;padding:1rem;cursor:pointer;transition:border-color .15s,background-color .15s}.option-card-selected{border-color:#f59e0b;background:#fffbeb;box-shadow:0 0 0 1px #f59e0b}</style>
+  <style>
+    /* CDO/CCO Level Design System */
+    body{background:#fafaf9;color:#1f2937;line-height:1.6}
+
+    /* Typography */
+    h1,h2,h3{font-weight:600;letter-spacing:-.02em}
+    h1{font-size:2.25rem;line-height:2.5rem}
+    h2{font-size:1.875rem;line-height:2.25rem}
+    h3{font-size:1.125rem}
+
+    /* Product Image */
+    .product-image{aspect-ratio:1/1;object-fit:cover;background:#f3f4f6}
+
+    /* Forms & Inputs */
+    .form-input,input,textarea,select{
+      width:100%;
+      border:1px solid #e5e7eb;
+      border-radius:.375rem;
+      padding:.625rem .875rem;
+      font-size:0.9375rem;
+      font-family:inherit;
+      transition:border-color .2s
+    }
+    .form-input:focus,input:focus,textarea:focus,select:focus{
+      outline:none;
+      border-color:#f59e0b;
+      box-shadow:0 0 0 3px rgba(245,158,11,.1)
+    }
+
+    /* Buttons */
+    .btn{
+      border-radius:.375rem;
+      padding:.75rem 1.5rem;
+      font-weight:600;
+      display:inline-block;
+      border:none;
+      cursor:pointer;
+      transition:all .2s;
+      text-decoration:none
+    }
+    .btn-primary{
+      background:#f59e0b;
+      color:#1f2937
+    }
+    .btn-primary:hover{
+      background:#d97706;
+      transform:translateY(-1px)
+    }
+    .btn-dark{
+      background:#1f2937;
+      color:white
+    }
+    .btn-dark:hover{
+      background:#111827
+    }
+
+    /* Stars */
+    .star{color:#f59e0b;letter-spacing:.05em}
+
+    /* Search Results */
+    .search-results{
+      position:absolute;
+      top:100%;
+      left:0;
+      right:0;
+      background:white;
+      color:#0f172a;
+      border-radius:0 0 .375rem .375rem;
+      overflow:hidden;
+      z-index:30;
+      box-shadow:0 4px 12px rgba(0,0,0,.08)
+    }
+
+    /* Account Menu */
+    .account-menu summary{list-style:none;cursor:pointer}
+    .account-menu summary::-webkit-details-marker{display:none}
+    .account-menu[open] summary{color:#f59e0b}
+    .account-dropdown{
+      position:absolute;
+      top:100%;
+      right:0;
+      margin-top:.5rem;
+      width:14rem;
+      background:white;
+      color:#0f172a;
+      border-radius:.375rem;
+      overflow:hidden;
+      z-index:30;
+      box-shadow:0 10px 30px rgba(0,0,0,.1)
+    }
+
+    /* Option Cards */
+    .option-card{
+      display:flex;
+      gap:.75rem;
+      border:1px solid #e5e7eb;
+      border-radius:.375rem;
+      padding:1rem;
+      cursor:pointer;
+      transition:all .2s
+    }
+    .option-card:hover{border-color:#d1d5db}
+    .option-card-selected{
+      border-color:#f59e0b;
+      background:#fffbeb
+    }
+  </style>
 </head>
 <body class="text-slate-800">
   <header class="bg-slate-950 text-white sticky top-0 z-20">
