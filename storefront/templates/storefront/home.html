@@ -6,16 +6,20 @@
 
   <section class="ik-hero" aria-labelledby="hero-title">
     <div class="flex flex-col items-start justify-center gap-5 p-6 md:p-12">
-      <p class="ik-eyebrow">Thoughtfully curated</p>
-      <h1 id="hero-title" class="ik-display">Quality fashion,<br>made accessible.</h1>
-      <p class="ik-lead max-w-xl">Discover a carefully selected collection of timeless pieces. Every item chosen for quality, style, and value.</p>
+      <p class="ik-eyebrow">{{ hero.eyebrow }}</p>
+      <h1 id="hero-title" class="ik-display">{{ hero.headline|linebreaks }}</h1>
+      <p class="ik-lead max-w-xl">{{ hero.description }}</p>
       <div class="flex flex-wrap gap-3 mt-2">
         <a class="ik-btn ik-btn-primary ik-btn-lg" href="{% url 'storefront:product_list' %}">Shop now {% icon 'chevron-right' %}</a>
         <a class="ik-btn ik-btn-secondary ik-btn-lg" href="#featured">Explore</a>
       </div>
     </div>
     <div class="ik-hero-art" aria-hidden="true">
-      <svg viewBox="0 0 440 280" preserveAspectRatio="xMidYMid slice"><rect class="b" x="40" y="60" width="150" height="190" rx="24"/><rect class="k" x="210" y="120" width="190" height="130" rx="24"/><circle class="a" cx="300" cy="70" r="44"/><rect class="s" x="64" y="200" width="80" height="16" rx="8"/><rect class="s" x="64" y="168" width="48" height="16" rx="8"/><circle class="b" cx="250" cy="185" r="12"/><circle class="a" cx="290" cy="185" r="12"/><circle class="b" cx="330" cy="185" r="12"/></svg>
+      {% if hero.image %}
+        <img src="{{ hero.image.url }}" alt="" class="w-full h-full object-cover">
+      {% else %}
+        <svg viewBox="0 0 440 280" preserveAspectRatio="xMidYMid slice"><rect class="b" x="40" y="60" width="150" height="190" rx="24"/><rect class="k" x="210" y="120" width="190" height="130" rx="24"/><circle class="a" cx="300" cy="70" r="44"/><rect class="s" x="64" y="200" width="80" height="16" rx="8"/><rect class="s" x="64" y="168" width="48" height="16" rx="8"/><circle class="b" cx="250" cy="185" r="12"/><circle class="a" cx="290" cy="185" r="12"/><circle class="b" cx="330" cy="185" r="12"/></svg>
+      {% endif %}
     </div>
   </section>
 
@@ -27,7 +31,13 @@
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
       {% for category in categories %}
       <a href="{% url 'storefront:category' category.slug %}" class="ik-cat">
-        <div class="ik-media">{% icon 'tag' 36 %}</div>
+        <div class="ik-media">
+          {% if category.image %}
+            <img src="{{ category.image.url }}" alt="{{ category.name }}" class="w-full h-full object-cover">
+          {% else %}
+            {% icon 'tag' 36 %}
+          {% endif %}
+        </div>
         <span>{{ category.name }}</span>
       </a>
       {% empty %}

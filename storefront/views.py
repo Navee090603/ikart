@@ -83,7 +83,13 @@ class IKartPasswordResetView(auth_views.PasswordResetView):
 
 
 def home(request):
+    from storefront.models import HeroSection
+    hero = HeroSection.objects.filter(is_active=True).first()
+    if not hero:
+        # Create default hero if none exists
+        hero, _ = HeroSection.objects.get_or_create(pk=1)
     return render(request, "storefront/home.html", {
+        "hero": hero,
         "featured": Product.objects.filter(is_active=True, is_featured=True)[:8],
         "categories": Category.objects.filter(parent__isnull=True)[:8],
     })

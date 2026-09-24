@@ -9,6 +9,23 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 
+class HeroSection(models.Model):
+    """Hero section configuration for the home page."""
+    eyebrow = models.CharField(max_length=100, default="Thoughtfully curated")
+    headline = models.CharField(max_length=200, default="Quality fashion,\nmade accessible.")
+    description = models.CharField(max_length=500, default="Discover a carefully selected collection of timeless pieces. Every item chosen for quality, style, and value.")
+    image = models.ImageField(upload_to="hero/", null=True, blank=True, help_text="Hero section background/illustration image")
+    is_active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Hero Section"
+        verbose_name_plural = "Hero Sections"
+
+    def __str__(self):
+        return "Hero Section"
+
+
 class Category(models.Model):
     name = models.CharField(max_length=100)
     slug = models.SlugField(unique=True, blank=True)
