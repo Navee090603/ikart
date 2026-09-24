@@ -1,1 +1,22 @@
-{% extends 'storefront/base.html' %}{% block title %}Verify your email | IKart{% endblock %}{% block content %}<div class="max-w-md mx-auto px-4 py-10"><div class="bg-white rounded-xl p-6 space-y-4"><h1 class="text-2xl font-bold">Verify your email</h1><p class="text-slate-600">We sent a six-digit code to <strong>{{ email }}</strong>. It expires in 10 minutes.</p><form method="post" class="space-y-4">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary w-full">Verify account</button></form><form method="post" action="{% url 'storefront:resend_verification_code' %}">{% csrf_token %}<button class="text-amber-700 text-sm">Resend verification code</button></form><details class="text-sm"{% if email_form.errors %} open{% endif %}><summary class="text-amber-700 cursor-pointer">Entered the wrong email?</summary><form method="post" action="{% url 'storefront:change_pending_email' %}" class="mt-3 space-y-2" novalidate data-live-validate>{% csrf_token %}<label for="{{ email_form.email.id_for_label }}" class="block font-medium mb-1">New email</label>{{ email_form.email }}<div id="{{ email_form.email.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not email_form.email.errors %} hidden{% endif %}">{{ email_form.email.errors.0 }}</div><button class="btn btn-dark w-full mt-2">Update email &amp; resend code</button></form></details></div></div>{% endblock %}
+{% extends 'storefront/auth_base.html' %}{% load storefront_extras %}{% block title %}Verify your email | IKart{% endblock %}
+{% block auth_content %}
+    <span class="ik-auth-icon">{% icon 'mail' 26 %}</span>
+    <div>
+      <h1 class="ik-h1">Verify your email</h1>
+      <p class="ik-sub mt-2">We sent a six-digit code to <strong class="text-ink">{{ email }}</strong>. It expires in 10 minutes.</p>
+    </div>
+    <form method="post" class="ik-form">{% csrf_token %}{{ form.as_p }}<button class="ik-btn ik-btn-primary ik-btn-lg ik-btn-block">Verify account</button></form>
+    <form method="post" action="{% url 'storefront:resend_verification_code' %}" class="text-center">{% csrf_token %}<button class="ik-btn ik-btn-ghost ik-btn-sm">Resend verification code</button></form>
+    <details class="ik-acc border-t border-line"{% if email_form.errors %} open{% endif %}>
+      <summary class="!text-[15px]">Entered the wrong email? {% icon 'chevron-down' %}</summary>
+      <form method="post" action="{% url 'storefront:change_pending_email' %}" class="ik-form flex flex-col gap-3 pb-4" novalidate data-live-validate>
+        {% csrf_token %}
+        <div class="ik-field">
+          <label for="{{ email_form.email.id_for_label }}">New email</label>
+          {{ email_form.email }}
+          <p id="{{ email_form.email.id_for_label }}-error" class="ik-error{% if not email_form.email.errors %} hidden{% endif %}">{{ email_form.email.errors.0 }}</p>
+        </div>
+        <button class="ik-btn ik-btn-secondary ik-btn-block">Update email &amp; resend code</button>
+      </form>
+    </details>
+{% endblock %}

@@ -1,131 +1,99 @@
-{% load static %}
+{% load static storefront_extras %}
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}IKart{% endblock %}</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23f59e0b'/%3E%3Cpath fill='%230f172a' d='M22 12h9v17l13-17h11L39 32l17 20H44L31 36v16h-9z'/%3E%3C/svg%3E">
+  <meta name="theme-color" content="#FFF8F1" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1E1714" media="(prefers-color-scheme: dark)">
+  <link rel="icon" type="image/svg+xml" href="{% static 'storefront/favicon.svg' %}">
+  <link rel="preload" href="{% static 'storefront/fonts/DMSans-latin-var.woff2' %}" as="font" type="font/woff2" crossorigin>
   <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    /* CDO/CCO Level Design System */
-    body{background:#fafaf9;color:#1f2937;line-height:1.6}
-
-    /* Typography */
-    h1,h2,h3{font-weight:600;letter-spacing:-.02em}
-    h1{font-size:2.25rem;line-height:2.5rem}
-    h2{font-size:1.875rem;line-height:2.25rem}
-    h3{font-size:1.125rem}
-
-    /* Product Image */
-    .product-image{aspect-ratio:1/1;object-fit:cover;background:#f3f4f6}
-
-    /* Forms & Inputs */
-    .form-input,input,textarea,select{
-      width:100%;
-      border:1px solid #e5e7eb;
-      border-radius:.375rem;
-      padding:.625rem .875rem;
-      font-size:0.9375rem;
-      font-family:inherit;
-      transition:border-color .2s
-    }
-    .form-input:focus,input:focus,textarea:focus,select:focus{
-      outline:none;
-      border-color:#f59e0b;
-      box-shadow:0 0 0 3px rgba(245,158,11,.1)
-    }
-
-    /* Buttons */
-    .btn{
-      border-radius:.375rem;
-      padding:.75rem 1.5rem;
-      font-weight:600;
-      display:inline-block;
-      border:none;
-      cursor:pointer;
-      transition:all .2s;
-      text-decoration:none
-    }
-    .btn-primary{
-      background:#f59e0b;
-      color:#1f2937
-    }
-    .btn-primary:hover{
-      background:#d97706;
-      transform:translateY(-1px)
-    }
-    .btn-dark{
-      background:#1f2937;
-      color:white
-    }
-    .btn-dark:hover{
-      background:#111827
-    }
-
-    /* Stars */
-    .star{color:#f59e0b;letter-spacing:.05em}
-
-    /* Search Results */
-    .search-results{
-      position:absolute;
-      top:100%;
-      left:0;
-      right:0;
-      background:white;
-      color:#0f172a;
-      border-radius:0 0 .375rem .375rem;
-      overflow:hidden;
-      z-index:30;
-      box-shadow:0 4px 12px rgba(0,0,0,.08)
-    }
-
-    /* Account Menu */
-    .account-menu summary{list-style:none;cursor:pointer}
-    .account-menu summary::-webkit-details-marker{display:none}
-    .account-menu[open] summary{color:#f59e0b}
-    .account-dropdown{
-      position:absolute;
-      top:100%;
-      right:0;
-      margin-top:.5rem;
-      width:14rem;
-      background:white;
-      color:#0f172a;
-      border-radius:.375rem;
-      overflow:hidden;
-      z-index:30;
-      box-shadow:0 10px 30px rgba(0,0,0,.1)
-    }
-
-    /* Option Cards */
-    .option-card{
-      display:flex;
-      gap:.75rem;
-      border:1px solid #e5e7eb;
-      border-radius:.375rem;
-      padding:1rem;
-      cursor:pointer;
-      transition:all .2s
-    }
-    .option-card:hover{border-color:#d1d5db}
-    .option-card-selected{
-      border-color:#f59e0b;
-      background:#fffbeb
-    }
-  </style>
+  <script>
+    // Tailwind handles layout utilities only; every colour, radius and font comes from the IKart tokens in ikart.css.
+    tailwind.config = { corePlugins: { preflight: true }, theme: { extend: {
+      colors: { brand: 'var(--brand)', 'brand-soft': 'var(--brand-soft)', 'brand-strong': 'var(--brand-strong)', accent: 'var(--accent)',
+        ink: 'var(--ink)', muted: 'var(--ink-muted)', surface: 'var(--surface)', raised: 'var(--surface-raised)', line: 'var(--border)',
+        success: 'var(--success)', 'success-soft': 'var(--success-soft)', danger: 'var(--danger)', 'danger-soft': 'var(--danger-soft)' },
+      fontFamily: { sans: ['DM Sans', 'DM Sans Ext', 'Nunito Sans', 'system-ui', 'sans-serif'] } } } };
+  </script>
+  <link rel="stylesheet" href="{% static 'storefront/css/ikart.css' %}">
+  {% block extra_head %}{% endblock %}
 </head>
-<body class="text-slate-800">
-  <header class="bg-slate-950 text-white sticky top-0 z-20">
-    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap gap-3 items-center">
-      <a href="{% url 'storefront:home' %}" class="font-black text-2xl text-amber-400">IKart</a>
-      <form action="{% url 'storefront:product_list' %}" class="flex flex-1 max-w-2xl relative"><input id="site-search" name="q" value="{{ request.GET.q }}" autocomplete="off" placeholder="Search IKart" class="rounded-r-none text-slate-900"><button class="bg-amber-400 px-4 rounded-r text-slate-950">Search</button><div id="search-results" class="search-results hidden"></div></form>
-      <nav class="flex items-center gap-4 text-sm ml-auto"><a href="{% url 'storefront:product_list' %}">Shop</a>{% if user.is_authenticated %}<details id="account-menu" class="account-menu relative"><summary class="flex items-center gap-1">Hi, {{ user.username }}<span class="text-xs">&#9662;</span></summary><div class="account-dropdown"><a class="block px-4 py-2 hover:bg-slate-100" href="{% url 'storefront:account' %}">My account</a><a class="block px-4 py-2 hover:bg-slate-100" href="{% url 'storefront:order_history' %}">Orders</a><a class="block px-4 py-2 hover:bg-slate-100" href="{% url 'storefront:wishlist' %}">Wishlist</a><a class="block px-4 py-2 hover:bg-slate-100" href="{% url 'storefront:addresses' %}">Addresses</a><a class="block px-4 py-2 hover:bg-slate-100" href="{% url 'storefront:notification_preferences' %}">Alerts</a><form method="post" action="{% url 'logout' %}" class="border-t">{% csrf_token %}<button class="block w-full text-left px-4 py-2 hover:bg-slate-100">Sign out</button></form></div></details>{% else %}<a href="{% url 'login' %}">Sign in</a>{% endif %}<a class="font-semibold" href="{% url 'storefront:cart' %}">Cart ({{ cart_count }})</a></nav>
+<body>
+  <a class="ik-sr" href="#main">Skip to content</a>
+  <header class="ik-header">
+    <div class="ik-header-in">
+      <a href="{% url 'storefront:home' %}" class="ik-logo" aria-label="IKart home">{% ikart_logo %}</a>
+      <form action="{% url 'storefront:product_list' %}" class="ik-search" role="search">
+        {% icon 'search' %}
+        <input id="site-search" name="q" type="search" value="{{ request.GET.q }}" autocomplete="off" placeholder="Search IKart" aria-label="Search products">
+        <button class="ik-search-go" type="submit">Search</button>
+        <div id="search-results" class="search-results hidden"></div>
+      </form>
+      <nav class="ik-nav" aria-label="Main">
+        <a class="ik-nav-link" href="{% url 'storefront:product_list' %}">{% icon 'bag' %}<span class="ik-nav-label">Shop</span></a>
+        {% if user.is_authenticated %}
+        <details id="account-menu" class="account-menu">
+          <summary class="ik-nav-link" aria-label="Account menu for {{ user.username }}">{% icon 'user' %}<span class="ik-nav-label">Hi, {{ user.username }}</span>{% icon 'chevron-down' 16 %}</summary>
+          <div class="account-dropdown">
+            <a href="{% url 'storefront:account' %}">{% icon 'user' 18 %}My account</a>
+            <a href="{% url 'storefront:order_history' %}">{% icon 'truck' 18 %}Orders</a>
+            <a href="{% url 'storefront:wishlist' %}">{% icon 'heart' 18 %}Wishlist</a>
+            <a href="{% url 'storefront:saved_for_later' %}">{% icon 'bag' 18 %}Saved for later</a>
+            <a href="{% url 'storefront:addresses' %}">{% icon 'home' 18 %}Addresses</a>
+            <a href="{% url 'storefront:notification_preferences' %}">{% icon 'bell' 18 %}Alerts</a>
+            <a href="{% url 'storefront:support' %}">{% icon 'info' 18 %}Help &amp; support</a>
+            <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button>{% icon 'close' 18 %}Sign out</button></form>
+          </div>
+        </details>
+        {% else %}
+        <a class="ik-nav-link" href="{% url 'login' %}">{% icon 'user' %}<span class="ik-nav-label">Sign in</span></a>
+        {% endif %}
+        <a class="ik-nav-link ik-cart-link" href="{% url 'storefront:cart' %}" aria-label="Cart, {{ cart_count }} item{{ cart_count|pluralize }}">{% icon 'cart' %}<span class="ik-nav-label">Cart</span><span class="ik-cart-count">{{ cart_count }}</span></a>
+      </nav>
     </div>
   </header>
-  {% if messages %}<div class="max-w-7xl mx-auto px-4 pt-4">{% for message in messages %}<div class="p-3 mb-2 rounded bg-amber-100">{{ message }}</div>{% endfor %}</div>{% endif %}
-  <main>{% block content %}{% endblock %}</main>
-  <footer class="bg-slate-900 text-slate-300 mt-14"><div class="max-w-7xl mx-auto px-4 py-9 grid gap-6 md:grid-cols-3"><div><div class="text-xl font-bold text-white">IKart</div><p class="mt-2 text-sm">Everyday shopping, made straightforward.</p></div><div><div class="font-semibold text-white">Customer care</div><a class="block mt-2 text-sm" href="{% url 'storefront:trust_page' 'returns' %}">Returns & refunds</a><a class="block mt-2 text-sm" href="{% url 'storefront:order_history' %}">Track your order</a><a class="block mt-2 text-sm" href="{% url 'storefront:support' %}">Help & support</a></div><div><div class="font-semibold text-white">Trust & legal</div><a class="block mt-2 text-sm" href="{% url 'storefront:trust_page' 'privacy' %}">Privacy policy</a><a class="block mt-2 text-sm" href="{% url 'storefront:trust_page' 'terms' %}">Terms of service</a><p class="text-sm mt-2">Secure, SSL-encrypted checkout</p></div></div></footer>
-  <script>const input=document.getElementById('site-search'),box=document.getElementById('search-results'),escapeHtml=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));let timer;input?.addEventListener('input',()=>{clearTimeout(timer);const q=input.value.trim();if(q.length<2){box.classList.add('hidden');return}timer=setTimeout(async()=>{const r=await fetch('{% url "storefront:search_autocomplete" %}?q='+encodeURIComponent(q));const d=await r.json();box.innerHTML=d.results.map(x=>`<a class="block px-3 py-2 hover:bg-slate-100" href="/product/${encodeURIComponent(x.slug)}/">${escapeHtml(x.name)}<span class="float-right">₹${escapeHtml(x.price)}</span></a>`).join('');box.classList.toggle('hidden',!d.results.length)},180)});document.addEventListener('click',e=>{if(!e.target.closest('#site-search')&&!e.target.closest('#search-results'))box.classList.add('hidden')});const accountMenu=document.getElementById('account-menu');document.addEventListener('click',e=>{if(accountMenu&&accountMenu.open&&!e.target.closest('#account-menu'))accountMenu.removeAttribute('open')});document.addEventListener('click',e=>{const btn=e.target.closest('.pw-toggle');if(!btn)return;const input=document.getElementById(btn.dataset.target);if(!input)return;const showing=input.type==='text';input.type=showing?'password':'text';btn.textContent=showing?'Show':'Hide'});document.querySelectorAll('.option-card input[type=radio]').forEach(radio=>{radio.addEventListener('change',()=>{document.querySelectorAll(`input[name="${radio.name}"]`).forEach(r=>r.closest('.option-card')?.classList.toggle('option-card-selected',r.checked))});if(radio.checked)radio.closest('.option-card')?.classList.add('option-card-selected')});</script>
+  {% if messages %}
+  <div class="ik-page" style="padding-bottom:0;padding-top:var(--space-4)">
+    <div class="ik-messages" role="status">
+      {% for message in messages %}
+      <div class="ik-alert{% if 'error' in message.tags %} ik-alert-danger{% elif 'success' in message.tags %} ik-alert-success{% elif 'warning' in message.tags %} ik-alert-warning{% endif %}">
+        {% if 'error' in message.tags %}{% icon 'alert' %}{% elif 'success' in message.tags %}{% icon 'check-circle' %}{% else %}{% icon 'info' %}{% endif %}
+        <p>{{ message }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  <main id="main">{% block content %}{% endblock %}</main>
+  <footer class="ik-footer">
+    <div class="ik-footer-in">
+      <div class="ik-footer-brand">
+        <a href="{% url 'storefront:home' %}" class="ik-logo" aria-label="IKart home">{% ikart_logo 28 %}</a>
+        <p>Everyday shopping, made straightforward.</p>
+      </div>
+      <div class="ik-footer-col">
+        <p class="ik-footer-head">Customer care</p>
+        <a href="{% url 'storefront:trust_page' 'returns' %}">Returns &amp; refunds</a>
+        <a href="{% url 'storefront:order_history' %}">Track your order</a>
+        <a href="{% url 'storefront:support' %}">Help &amp; support</a>
+      </div>
+      <div class="ik-footer-col">
+        <p class="ik-footer-head">Trust &amp; legal</p>
+        <a href="{% url 'storefront:trust_page' 'privacy' %}">Privacy policy</a>
+        <a href="{% url 'storefront:trust_page' 'terms' %}">Terms of service</a>
+      </div>
+      <div class="ik-footer-col">
+        <p class="ik-footer-head">Shop</p>
+        <a href="{% url 'storefront:product_list' %}">Shop all</a>
+        <a href="{% url 'storefront:wishlist' %}">Wishlist</a>
+        <a href="{% url 'storefront:cart' %}">Cart</a>
+      </div>
+    </div>
+    <p class="ik-footer-note">{% icon 'check-circle' 16 %}Secure, SSL-encrypted checkout</p>
+  </footer>
+  <script>const input=document.getElementById('site-search'),box=document.getElementById('search-results'),escapeHtml=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));let timer;input?.addEventListener('input',()=>{clearTimeout(timer);const q=input.value.trim();if(q.length<2){box.classList.add('hidden');return}timer=setTimeout(async()=>{const r=await fetch('{% url "storefront:search_autocomplete" %}?q='+encodeURIComponent(q));const d=await r.json();box.innerHTML=d.results.map(x=>`<a href="/product/${encodeURIComponent(x.slug)}/">${escapeHtml(x.name)}<span>₹${escapeHtml(x.price)}</span></a>`).join('');box.classList.toggle('hidden',!d.results.length)},180)});document.addEventListener('click',e=>{if(!e.target.closest('#site-search')&&!e.target.closest('#search-results'))box.classList.add('hidden')});const accountMenu=document.getElementById('account-menu');document.addEventListener('click',e=>{if(accountMenu&&accountMenu.open&&!e.target.closest('#account-menu'))accountMenu.removeAttribute('open')});document.addEventListener('click',e=>{const btn=e.target.closest('.pw-toggle');if(!btn)return;const input=document.getElementById(btn.dataset.target);if(!input)return;const showing=input.type==='text';input.type=showing?'password':'text';btn.textContent=showing?'Show':'Hide'});document.querySelectorAll('.ik-option input[type=radio]').forEach(radio=>{radio.addEventListener('change',()=>{document.querySelectorAll(`input[name="${radio.name}"]`).forEach(r=>r.closest('.ik-option')?.classList.toggle('option-card-selected',r.checked))});if(radio.checked)radio.closest('.ik-option')?.classList.add('option-card-selected')});</script>
   <script>
   (function () {
     // Common-password list mirrors Django's CommonPasswordValidator so the

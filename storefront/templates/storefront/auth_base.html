@@ -1,0 +1,18 @@
+{% extends 'storefront/base.html' %}{% load storefront_extras %}
+{# Shared layout for sign in, sign up, email verification and password pages. Child templates fill `auth_content`. #}
+{% block content %}
+<div class="ik-auth">
+  <aside class="ik-auth-side" aria-hidden="true">
+    <svg class="ik-auth-art" viewBox="0 0 460 420"><rect class="b" x="120" y="60" width="180" height="230" rx="24"/><rect class="k" x="316" y="140" width="170" height="150" rx="24"/><circle class="a" cx="380" cy="90" r="44"/><rect class="s" x="148" y="240" width="96" height="16" rx="8"/><rect class="s" x="148" y="208" width="56" height="16" rx="8"/></svg>
+    <h2>{% block auth_side_title %}Everyday shopping, made straightforward.{% endblock %}</h2>
+    <ul>
+      <li>{% icon 'truck' %}Track every order in one place</li>
+      <li>{% icon 'heart' %}Keep your wishlist and saved items</li>
+      <li>{% icon 'home' %}Check out faster with saved addresses</li>
+    </ul>
+  </aside>
+  <div class="ik-auth-main">
+    <div class="ik-auth-card">{% block auth_content %}{% endblock %}</div>
+  </div>
+</div>
+{% endblock %}

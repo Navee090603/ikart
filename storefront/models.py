@@ -136,17 +136,18 @@ class Order(models.Model):
 
     # Badge color for each status, shared by the order list and order detail
     # pages so a status always reads the same way everywhere it appears.
+    # IKart design-system badge tones (see storefront/static/storefront/css/ikart.css).
     STATUS_BADGE_CLASSES = {
-        Status.PAYMENT_PENDING: "bg-amber-100 text-amber-800",
-        Status.PAYMENT_FAILED: "bg-red-100 text-red-700",
-        Status.PLACED: "bg-slate-100 text-slate-700",
-        Status.SHIPPED: "bg-blue-100 text-blue-700",
-        Status.OUT_FOR_DELIVERY: "bg-indigo-100 text-indigo-700",
-        Status.DELIVERED: "bg-emerald-100 text-emerald-700",
-        Status.CANCELLED: "bg-red-100 text-red-700",
-        Status.CANCELLATION_REQUESTED: "bg-amber-100 text-amber-800",
-        Status.RETURN_REQUESTED: "bg-amber-100 text-amber-800",
-        Status.REFUNDED: "bg-slate-100 text-slate-700",
+        Status.PAYMENT_PENDING: "ik-badge-warning",
+        Status.PAYMENT_FAILED: "ik-badge-danger",
+        Status.PLACED: "ik-badge-neutral",
+        Status.SHIPPED: "ik-badge-brand",
+        Status.OUT_FOR_DELIVERY: "ik-badge-brand",
+        Status.DELIVERED: "ik-badge-success",
+        Status.CANCELLED: "ik-badge-danger",
+        Status.CANCELLATION_REQUESTED: "ik-badge-warning",
+        Status.RETURN_REQUESTED: "ik-badge-warning",
+        Status.REFUNDED: "ik-badge-neutral",
     }
 
     class PaymentMethod(models.TextChoices):
@@ -197,7 +198,7 @@ class Order(models.Model):
 
     @property
     def status_badge_class(self):
-        return self.STATUS_BADGE_CLASSES.get(self.status, "bg-slate-100 text-slate-700")
+        return self.STATUS_BADGE_CLASSES.get(self.status, "ik-badge-neutral")
 
 
 class OrderItem(models.Model):

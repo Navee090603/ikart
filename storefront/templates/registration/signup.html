@@ -1,102 +1,42 @@
-{% extends 'storefront/base.html' %}
+{% extends 'storefront/auth_base.html' %}{% load storefront_extras %}
 
 {% block title %}Create account | IKart{% endblock %}
 
-{% block content %}
-<div class="max-w-md mx-auto px-4 py-10">
-    <div class="bg-white rounded-xl p-6 space-y-5">
-
-        <div>
-            <h1 class="text-2xl font-bold">
-                Create your account
-            </h1>
-
-            <p class="text-sm text-gray-600 mt-2">
-                Join IKart to track orders, save your wishlist, and check out faster.
-            </p>
-        </div>
-
-        <form method="post" class="space-y-4" novalidate data-live-validate>
-            {% csrf_token %}
-
-            {% if form.non_field_errors %}
-            <div class="text-sm text-red-600">
-                {{ form.non_field_errors }}
-            </div>
-            {% endif %}
-
-            <div>
-                <label for="{{ form.username.id_for_label }}" class="block text-sm font-medium mb-1">
-                    Username
-                </label>
-
-                {{ form.username }}
-
-                <div id="{{ form.username.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.username.errors %} hidden{% endif %}">
-                    {{ form.username.errors.0 }}
-                </div>
-            </div>
-
-            <div>
-                <label for="{{ form.email.id_for_label }}" class="block text-sm font-medium mb-1">
-                    Email
-                </label>
-
-                {{ form.email }}
-
-                <div id="{{ form.email.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.email.errors %} hidden{% endif %}">
-                    {{ form.email.errors.0 }}
-                </div>
-            </div>
-
-            <div>
-                <label for="{{ form.password1.id_for_label }}" class="block text-sm font-medium mb-1">
-                    Password
-                </label>
-
-                <div class="relative">
-                    {{ form.password1 }}
-
-                    <button type="button" class="pw-toggle absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-500 hover:text-slate-700" data-target="{{ form.password1.id_for_label }}">
-                        Show
-                    </button>
-                </div>
-
-                <div id="{{ form.password1.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.password1.errors %} hidden{% endif %}">
-                    {{ form.password1.errors.0 }}
-                </div>
-            </div>
-
-            <div>
-                <label for="{{ form.password2.id_for_label }}" class="block text-sm font-medium mb-1">
-                    Confirm password
-                </label>
-
-                <div class="relative">
-                    {{ form.password2 }}
-
-                    <button type="button" class="pw-toggle absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-500 hover:text-slate-700" data-target="{{ form.password2.id_for_label }}">
-                        Show
-                    </button>
-                </div>
-
-                <div id="{{ form.password2.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.password2.errors %} hidden{% endif %}">
-                    {{ form.password2.errors.0 }}
-                </div>
-            </div>
-
-            <button type="submit" class="btn btn-primary w-full">
-                Create account
-            </button>
-        </form>
-
-        <p class="text-sm text-center">
-            Already have an account?
-            <a class="text-amber-700 hover:underline font-medium" href="{% url 'login' %}">
-                Sign in
-            </a>
-        </p>
-
+{% block auth_content %}
+    <div>
+      <h1 class="ik-h1">Create your account</h1>
+      <p class="ik-sub mt-2">Join IKart to track orders, save your wishlist, and check out faster.</p>
     </div>
-</div>
+    <form method="post" class="ik-form flex flex-col gap-4" novalidate data-live-validate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="ik-alert ik-alert-danger" role="alert">{% icon 'alert' %}<div>{{ form.non_field_errors }}</div></div>{% endif %}
+      <div class="ik-field">
+        <label for="{{ form.username.id_for_label }}">Username</label>
+        {{ form.username }}
+        <p id="{{ form.username.id_for_label }}-error" class="ik-error{% if not form.username.errors %} hidden{% endif %}">{{ form.username.errors.0 }}</p>
+      </div>
+      <div class="ik-field">
+        <label for="{{ form.email.id_for_label }}">Email</label>
+        {{ form.email }}
+        <p id="{{ form.email.id_for_label }}-error" class="ik-error{% if not form.email.errors %} hidden{% endif %}">{{ form.email.errors.0 }}</p>
+      </div>
+      <div class="ik-field">
+        <label for="{{ form.password1.id_for_label }}">Password</label>
+        <div class="ik-pw">
+          {{ form.password1 }}
+          <button type="button" class="pw-toggle" data-target="{{ form.password1.id_for_label }}" aria-label="Show or hide password">Show</button>
+        </div>
+        <p id="{{ form.password1.id_for_label }}-error" class="ik-error{% if not form.password1.errors %} hidden{% endif %}">{{ form.password1.errors.0 }}</p>
+      </div>
+      <div class="ik-field">
+        <label for="{{ form.password2.id_for_label }}">Confirm password</label>
+        <div class="ik-pw">
+          {{ form.password2 }}
+          <button type="button" class="pw-toggle" data-target="{{ form.password2.id_for_label }}" aria-label="Show or hide password">Show</button>
+        </div>
+        <p id="{{ form.password2.id_for_label }}-error" class="ik-error{% if not form.password2.errors %} hidden{% endif %}">{{ form.password2.errors.0 }}</p>
+      </div>
+      <button type="submit" class="ik-btn ik-btn-primary ik-btn-lg ik-btn-block">Create account</button>
+    </form>
+    <p class="ik-auth-alt">Already have an account? <a class="ik-link" href="{% url 'login' %}">Sign in</a></p>
 {% endblock %}

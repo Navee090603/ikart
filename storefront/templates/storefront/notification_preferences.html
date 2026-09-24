@@ -1,3 +1,12 @@
-{% extends 'storefront/base.html' %}
+{% extends 'storefront/account_base.html' %}{% load storefront_extras %}
 {% block title %}Notification preferences | IKart{% endblock %}
-{% block content %}<div class="max-w-xl mx-auto px-4 py-10"><form method="post" class="bg-white rounded-xl p-6 space-y-4">{% csrf_token %}<h1 class="text-2xl font-bold">Notification preferences</h1><p class="text-slate-600">Order and support updates are always sent when needed. Choose whether to receive optional promotions.</p>{{ form.as_p }}<p class="text-sm text-slate-500">SMS delivery needs a configured SMS provider; this choice is saved for when that service is connected.</p><button class="btn btn-primary">Save preferences</button></form></div>{% endblock %}
+{% block account_content %}
+<h1 class="ik-h1">Notification preferences</h1>
+<form method="post" class="ik-panel ik-form max-w-xl flex flex-col gap-4">
+  {% csrf_token %}
+  <p class="ik-muted">Order and support updates are always sent when needed. Choose whether to receive optional promotions.</p>
+  <div>{{ form.as_p }}</div>
+  <div class="ik-alert">{% icon 'info' %}<p class="text-sm">SMS delivery needs a configured SMS provider; this choice is saved for when that service is connected.</p></div>
+  <button class="ik-btn ik-btn-primary self-start">Save preferences</button>
+</form>
+{% endblock %}

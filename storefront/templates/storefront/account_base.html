@@ -1,0 +1,21 @@
+{% extends 'storefront/base.html' %}{% load storefront_extras %}
+{# Shared layout for signed-in account pages: side navigation + content. Child templates fill `account_content`. #}
+{% block content %}
+{% with url_name=request.resolver_match.url_name %}
+<div class="ik-page">
+  <div class="ik-account">
+    <nav class="ik-side-nav" aria-label="Your account">
+      <div class="ik-side-who"><b>Hi, {{ user.username }}</b>{% if user.email %}<span>{{ user.email }}</span>{% endif %}</div>
+      <a href="{% url 'storefront:order_history' %}" {% if url_name == 'order_history' or url_name == 'request_order_change' %}aria-current="page"{% endif %}>{% icon 'truck' %}Orders</a>
+      <a href="{% url 'storefront:account' %}" {% if url_name == 'account' %}aria-current="page"{% endif %}>{% icon 'user' %}My account</a>
+      <a href="{% url 'storefront:addresses' %}" {% if url_name == 'addresses' or url_name == 'edit_address' %}aria-current="page"{% endif %}>{% icon 'home' %}Addresses</a>
+      <a href="{% url 'storefront:wishlist' %}" {% if url_name == 'wishlist' %}aria-current="page"{% endif %}>{% icon 'heart' %}Wishlist</a>
+      <a href="{% url 'storefront:saved_for_later' %}" {% if url_name == 'saved_for_later' %}aria-current="page"{% endif %}>{% icon 'bag' %}Saved for later</a>
+      <a href="{% url 'storefront:notification_preferences' %}" {% if url_name == 'notification_preferences' %}aria-current="page"{% endif %}>{% icon 'bell' %}Notifications</a>
+      <a href="{% url 'storefront:support' %}" {% if url_name == 'support' or url_name == 'support_ticket' %}aria-current="page"{% endif %}>{% icon 'info' %}Help &amp; support</a>
+    </nav>
+    <div class="min-w-0 flex flex-col gap-6">{% block account_content %}{% endblock %}</div>
+  </div>
+</div>
+{% endwith %}
+{% endblock %}

@@ -1,3 +1,19 @@
 {% extends 'storefront/base.html' %}
 {% block title %}Store analytics | IKart{% endblock %}
-{% block content %}<div class="max-w-6xl mx-auto px-4 py-8"><div class="flex justify-between items-center"><h1 class="text-3xl font-bold">Store analytics</h1><a class="text-amber-700" href="/admin/">Open admin</a></div><div class="grid md:grid-cols-2 gap-4 mt-6"><div class="bg-white rounded-xl p-6"><p class="text-slate-500">Sales revenue</p><p class="text-3xl font-bold mt-2">₹{{ revenue }}</p></div><div class="bg-white rounded-xl p-6"><p class="text-slate-500">Orders</p><p class="text-3xl font-bold mt-2">{{ order_count }}</p></div></div><div class="grid md:grid-cols-2 gap-6 mt-6"><section class="bg-white rounded-xl p-6"><h2 class="text-xl font-bold">Top products</h2><div class="mt-4 space-y-3">{% for item in top_products %}<div class="flex justify-between"><span>{{ item.product_name }}</span><strong>{{ item.units }} units</strong></div>{% empty %}<p class="text-slate-500">No sales yet.</p>{% endfor %}</div></section><section class="bg-white rounded-xl p-6"><h2 class="text-xl font-bold">Low-stock alerts</h2><div class="mt-4 space-y-3">{% for product in low_stock %}<div class="flex justify-between"><span>{{ product.name }}</span><strong class="text-amber-700">{{ product.stock }} left</strong></div>{% empty %}<p class="text-slate-500">All stock levels are healthy.</p>{% endfor %}</div></section></div><section class="bg-white rounded-xl p-6 mt-6"><h2 class="text-xl font-bold">Open return and cancellation requests</h2><div class="mt-4 space-y-3">{% for request in open_requests %}<div><strong>{{ request.order.number }}</strong> · {{ request.get_request_type_display }} · {{ request.user.username }}<p class="text-sm text-slate-500">{{ request.get_reason_display }}</p></div>{% empty %}<p class="text-slate-500">No open requests.</p>{% endfor %}</div></section></div>{% endblock %}
+{% block content %}
+<div class="ik-page flex flex-col gap-6">
+  <div class="flex flex-wrap justify-between items-center gap-3">
+    <h1 class="ik-h1">Store analytics</h1>
+    <a class="ik-btn ik-btn-secondary ik-btn-sm" href="/admin/">Open admin</a>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="ik-panel"><p class="ik-eyebrow">Sales revenue</p><p class="text-3xl font-bold mt-2">₹{{ revenue }}</p></div>
+    <div class="ik-panel"><p class="ik-eyebrow">Orders</p><p class="text-3xl font-bold mt-2">{{ order_count }}</p></div>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <section class="ik-panel"><h2 class="ik-h2">Top products</h2><div class="mt-4 flex flex-col gap-3">{% for item in top_products %}<div class="flex justify-between gap-3"><span>{{ item.product_name }}</span><strong>{{ item.units }} units</strong></div>{% empty %}<p class="ik-muted">No sales yet.</p>{% endfor %}</div></section>
+    <section class="ik-panel"><h2 class="ik-h2">Low-stock alerts</h2><div class="mt-4 flex flex-col gap-3">{% for product in low_stock %}<div class="flex justify-between gap-3"><span>{{ product.name }}</span><span class="ik-badge ik-badge-warning">{{ product.stock }} left</span></div>{% empty %}<p class="ik-muted">All stock levels are healthy.</p>{% endfor %}</div></section>
+  </div>
+  <section class="ik-panel"><h2 class="ik-h2">Open return and cancellation requests</h2><div class="mt-4 flex flex-col gap-3">{% for request in open_requests %}<div><strong>{{ request.order.number }}</strong> · {{ request.get_request_type_display }} · {{ request.user.username }}<p class="text-sm ik-muted">{{ request.get_reason_display }}</p></div>{% empty %}<p class="ik-muted">No open requests.</p>{% endfor %}</div></section>
+</div>
+{% endblock %}

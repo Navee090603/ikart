@@ -23,7 +23,7 @@ NEW_PASSWORD_VALIDATE_RULE = "required minlength notnumeric notalpha special not
 # base.html's global `input{width:100%;padding:...}` rule is meant for text
 # inputs; radios need the same "w-auto" override product_list.html already
 # uses for its checkbox, or they render as oversized boxes.
-RADIO_WIDGET_ATTRS = {"class": "w-auto accent-amber-500"}
+RADIO_WIDGET_ATTRS = {"class": "ik-radio"}
 
 
 def _validate_email_not_registered(email):

@@ -1,240 +1,223 @@
-{% extends 'storefront/base.html' %}
+{% extends 'storefront/base.html' %}{% load storefront_extras %}
 
 {% block title %}{{ product.name }} | IKart{% endblock %}
 
 {% block content %}
+<div class="ik-page flex flex-col gap-12">
 
-<div class="max-w-7xl mx-auto px-4 py-12">
+  <div class="flex flex-col gap-6">
+    <nav aria-label="Breadcrumb">
+      <ol class="ik-crumbs">
+        <li><a href="{% url 'storefront:home' %}">Home</a></li>
+        <li aria-hidden="true">{% icon 'chevron-right' 14 %}</li>
+        <li><a href="{% url 'storefront:category' product.category.slug %}">{{ product.category }}</a></li>
+        <li aria-hidden="true">{% icon 'chevron-right' 14 %}</li>
+        <li><span aria-current="page">{{ product.name }}</span></li>
+      </ol>
+    </nav>
 
-  <!-- Main Product Section -->
-  <div class="grid md:grid-cols-2 gap-16 mb-20">
+    <div class="grid md:grid-cols-2 gap-8 lg:gap-12 items-start">
 
-    <!-- Images: Left Side -->
-    <div>
-      <!-- Main Image -->
-      {% if product.images.exists %}
-      <div class="bg-slate-50 rounded-lg overflow-hidden">
-        <img id="mainProductImage" src="{{ product.images.first.image.url }}"
-          class="w-full max-h-[600px] object-contain" alt="{{ product.name }}">
-      </div>
-
-      <!-- Thumbnail Gallery -->
-      <div class="flex gap-3 mt-6 overflow-x-auto">
-        {% for image in product.images.all %}
-        <button
-          onclick="changeProductImage('{{ image.image.url }}')"
-          class="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border border-slate-200 hover:border-slate-400 transition-colors">
-          <img src="{{ image.image.url }}" alt="{{ product.name }}" class="w-full h-full object-cover">
-        </button>
-        {% endfor %}
-      </div>
-      {% else %}
-      <div class="bg-slate-100 rounded-lg h-96 grid place-items-center text-slate-400">
-        No image available
-      </div>
-      {% endif %}
-    </div>
-
-    <!-- Details: Right Side -->
-    <div>
-      <!-- Breadcrumb -->
-      <p class="text-xs font-600 text-slate-500 tracking-widest">
-        {{ product.category }}{% if product.brand %} · {{ product.brand|upper }}{% endif %}
-      </p>
-
-      <!-- Product Title -->
-      <h1 class="mt-4 text-4xl font-600 text-slate-900 leading-tight">{{ product.name }}</h1>
-
-      <!-- Rating -->
-      <div class="mt-6 flex items-center gap-3">
-        <div class="flex gap-1">
-          {% for i in '12345' %}
-          {% if forloop.counter <= product.average_rating|floatformat:0 %}
-          <span class="star text-lg">★</span>
-          {% else %}
-          <span class="text-slate-300 text-lg">★</span>
-          {% endif %}
+      <section aria-label="Product photos" class="flex flex-col gap-4">
+        {% if product.images.exists %}
+        <div class="ik-media ik-gallery-main">
+          <img id="mainProductImage" src="{{ product.images.first.image.url }}" alt="{{ product.name }}">
+          {% if product.discount_percentage %}<span class="ik-card-badge"><span class="ik-badge ik-badge-deal">{{ product.discount_percentage }}% off</span></span>{% endif %}
+        </div>
+        {% if product.images.count > 1 %}
+        <div class="flex gap-3 overflow-x-auto pb-1">
+          {% for image in product.images.all %}
+          <button type="button" class="ik-gallery-thumb" aria-label="Show photo {{ forloop.counter }}" aria-pressed="{% if forloop.first %}true{% else %}false{% endif %}" onclick="changeProductImage(this, '{{ image.image.url }}')">
+            <img src="{{ image.image.url }}" alt="">
+          </button>
           {% endfor %}
         </div>
-        <span class="text-sm text-slate-600">{{ product.average_rating }} • {{ product.reviews.count }} review{{ product.reviews.count|pluralize }}</span>
-      </div>
-
-      <!-- Price Section -->
-      <div class="mt-8 border-t border-b border-slate-200 py-6">
-        <div class="flex items-baseline gap-3">
-          <span class="text-4xl font-700 text-slate-900">₹{{ product.price }}</span>
-          {% if product.compare_at_price %}
-          <span class="text-lg text-slate-400 line-through">₹{{ product.compare_at_price }}</span>
-          <span class="text-sm font-600 text-emerald-700">Save {{ product.discount_percentage }}%</span>
-          {% endif %}
-        </div>
-      </div>
-
-      <!-- Description -->
-      <p class="mt-6 text-slate-600 leading-relaxed">{{ product.short_description }}</p>
-
-      <!-- Stock Status -->
-      <div class="mt-6">
-        {% if product.stock %}
-        <p class="text-sm font-600 text-emerald-700">✓ In stock • {{ product.stock }} available</p>
+        {% endif %}
         {% else %}
-        <p class="text-sm font-600 text-slate-500">Out of stock</p>
+        <div class="ik-media ik-gallery-main">{% icon 'bag' 64 %}<span class="ik-sr">No image available</span></div>
         {% endif %}
-      </div>
+      </section>
 
-      <!-- Wishlist Button -->
-      {% if user.is_authenticated %}
-      <form method="post" action="{% url 'storefront:toggle_wishlist' product.id %}" class="mt-4">
-        {% csrf_token %}
-        <input type="hidden" name="next" value="{{ request.path }}">
-        <button class="text-sm font-600 text-slate-500 hover:text-slate-900">
-          {% if is_wishlisted %}
-          ♥ Remove from wishlist
-          {% else %}
-          ♡ Add to wishlist
-          {% endif %}
-        </button>
-      </form>
-      {% endif %}
-
-      <!-- Purchase Form -->
-      <form method="post" action="{% url 'storefront:add_to_cart' product.id %}" class="mt-8 space-y-5">
-        {% csrf_token %}
-
-        <!-- Variants -->
-        {% if product.variants.exists %}
-        <div>
-          <label class="block text-sm font-600 text-slate-900 mb-2">Select option</label>
-          <select name="variant" class="form-input" required>
-            {% for variant in product.variants.all %}
-            <option value="{{ variant.id }}" {% if not variant.stock %}disabled{% endif %}>
-              {{ variant.label }}
-              {% if variant.price_adjustment %}(+₹{{ variant.price_adjustment|floatformat:2 }}){% endif %}
-            </option>
-            {% endfor %}
-          </select>
-        </div>
-        {% endif %}
-
-        <!-- Quantity -->
-        <div>
-          <label class="block text-sm font-600 text-slate-900 mb-2">Quantity</label>
-          <input type="number" name="quantity" min="1" value="1" class="form-input w-32">
-        </div>
-
-        <!-- CTA Button -->
-        <button class="w-full btn btn-primary py-3.5 text-base font-600 {% if not product.stock %}opacity-50 cursor-not-allowed{% endif %}" {% if not product.stock %}disabled{% endif %}>
-          Add to cart
-        </button>
-      </form>
-
-      <!-- Trust Footer -->
-      <div class="mt-8 pt-8 border-t border-slate-200 text-sm text-slate-600 space-y-2">
-        <p>✓ Secure checkout with SSL encryption</p>
-        <p>✓ 30-day return policy</p>
-        <p>✓ Free shipping on orders over ₹999</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- Product Details Section -->
-  <div class="max-w-3xl">
-    <details class="cursor-pointer group">
-      <summary class="py-6 border-b border-slate-200 font-600 text-slate-900 group-open:text-amber-700 flex justify-between items-center">
-        <span>Product details & care</span>
-        <span class="text-lg">+</span>
-      </summary>
-      <div class="py-6 text-slate-600 whitespace-pre-line">
-        {{ product.description }}
-        {% if product.specifications %}
-        {{ product.specifications }}
-        {% endif %}
-      </div>
-    </details>
-  </div>
-
-  <!-- Reviews Section -->
-  <div class="mt-16 max-w-3xl">
-    <h2 class="text-2xl font-600 text-slate-900 mb-8">Customer reviews</h2>
-
-    <!-- Write Review Prompt -->
-    {% if has_purchased %}
-    <div class="bg-blue-50 rounded-lg p-6 mb-8 border border-blue-100">
-      <p class="text-sm text-blue-900">
-        <span class="font-600">✓ You've purchased this item</span> —
-        <a class="font-600 text-blue-700 hover:underline" href="{% url 'storefront:order_history' %}">Write a review</a>
-      </p>
-    </div>
-    {% endif %}
-
-    <!-- Reviews List -->
-    <div class="space-y-6">
-      {% for review in reviews %}
-      <div class="border-b border-slate-200 pb-6">
-        <div class="flex items-start justify-between mb-3">
-          <div class="flex gap-1">
-            {% for i in '12345' %}
-            {% if forloop.counter <= review.rating %}<span class="star">★</span>{% else %}<span class="text-slate-300">★</span>{% endif %}
-            {% endfor %}
+      <section class="flex flex-col gap-5" aria-labelledby="product-title">
+        <div class="flex flex-col gap-3">
+          {% if product.brand %}<p class="ik-eyebrow">{{ product.brand }}</p>{% endif %}
+          <h1 id="product-title" class="ik-h1">{{ product.name }}</h1>
+          <div class="flex flex-wrap items-center gap-3">
+            <p class="ik-rating"><span class="ik-star" aria-hidden="true">★</span><b>{{ product.average_rating }}</b><span>· {{ product.reviews.count }} review{{ product.reviews.count|pluralize }}</span><span class="ik-sr"> out of 5</span></p>
+            {% if product.stock %}
+            <span class="ik-badge ik-badge-success">In stock · {{ product.stock }} available</span>
+            {% else %}
+            <span class="ik-badge">Out of stock</span>
+            {% endif %}
           </div>
-          {% if review.user_id in purchased_user_ids %}
-          <span class="text-xs font-600 text-emerald-700">VERIFIED</span>
+        </div>
+
+        <div class="flex flex-col gap-1">
+          <p class="ik-price ik-price-lg">
+            <span class="ik-price-now">₹{{ product.price }}</span>
+            {% if product.compare_at_price %}
+            <s class="ik-price-was"><span class="ik-sr">was </span>₹{{ product.compare_at_price }}</s>
+            <span class="ik-price-off">Save {{ product.discount_percentage }}%</span>
+            {% endif %}
+          </p>
+        </div>
+
+        {% if product.short_description %}<p class="ik-lead">{{ product.short_description }}</p>{% endif %}
+        <hr class="ik-rule">
+
+        <form method="post" action="{% url 'storefront:add_to_cart' product.id %}" class="ik-form flex flex-col gap-4">
+          {% csrf_token %}
+          {% if product.variants.exists %}
+          <div>
+            <label for="variant-select">Select option</label>
+            <select id="variant-select" name="variant" required>
+              {% for variant in product.variants.all %}
+              <option value="{{ variant.id }}" {% if not variant.stock %}disabled{% endif %}>
+                {{ variant.label }}{% if variant.price_adjustment %} (+₹{{ variant.price_adjustment|floatformat:2 }}){% endif %}{% if not variant.stock %} — out of stock{% endif %}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endif %}
+
+          <div class="flex flex-wrap items-end gap-3">
+            <div>
+              <label for="qty">Quantity</label>
+              <input id="qty" type="number" name="quantity" min="1" value="1" class="ik-qty-input">
+            </div>
+            <button class="ik-btn ik-btn-primary ik-btn-lg flex-1 min-w-[200px]" {% if not product.stock %}disabled{% endif %}>
+              {% icon 'cart' %}{% if product.stock %}Add to cart{% else %}Out of stock{% endif %}
+            </button>
+          </div>
+        </form>
+
+        {% if user.is_authenticated %}
+        <form method="post" action="{% url 'storefront:toggle_wishlist' product.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.path }}">
+          <button class="ik-btn ik-btn-secondary" aria-pressed="{% if is_wishlisted %}true{% else %}false{% endif %}">
+            {% if is_wishlisted %}
+            <span class="text-brand">{% icon 'heart' css='fill-current' %}</span>Remove from wishlist
+            {% else %}
+            {% icon 'heart' %}Add to wishlist
+            {% endif %}
+          </button>
+        </form>
+        {% endif %}
+
+        <ul class="ik-perks">
+          <li>{% icon 'lock' 18 %}Secure SSL checkout</li>
+          <li>{% icon 'check-circle' 18 %}30-day return policy</li>
+          <li>{% icon 'truck' 18 %}Free shipping over ₹999</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <div class="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-8 lg:gap-12 items-start">
+    <div class="flex flex-col gap-12">
+
+      <details class="ik-acc" open>
+        <summary>Product details &amp; care {% icon 'chevron-down' %}</summary>
+        <div class="ik-acc-body whitespace-pre-line">{{ product.description }}{% if product.specifications %}
+
+{{ product.specifications }}{% endif %}</div>
+      </details>
+
+      <section aria-labelledby="reviews-title">
+        <h2 id="reviews-title" class="ik-h2 mb-4">Customer reviews</h2>
+        {% if has_purchased %}
+        <div class="ik-alert ik-alert-success mb-4">
+          {% icon 'check-circle' %}
+          <p><span class="ik-alert-title">You've purchased this item</span> — <a href="{% url 'storefront:order_history' %}">Write a review</a></p>
+        </div>
+        {% endif %}
+        {% for review in reviews %}
+        <article class="ik-review">
+          <div class="flex items-center justify-between gap-3">
+            <p class="ik-stars" aria-label="{{ review.rating }} out of 5 stars">{% for i in '12345' %}{% if forloop.counter <= review.rating %}★{% else %}<span class="off">★</span>{% endif %}{% endfor %}</p>
+            {% if review.user_id in purchased_user_ids %}<span class="ik-badge ik-badge-success">{% icon 'check' 14 %}Verified purchase</span>{% endif %}
+          </div>
+          <h3 class="font-semibold mt-2">{{ review.title }}</h3>
+          <p class="ik-muted mt-1">{{ review.body }}</p>
+          <p class="text-sm ik-muted mt-2">{{ review.user.username }} · {{ review.created_at|date:'d M Y' }}</p>
+        </article>
+        {% empty %}
+        <p class="ik-muted py-4">No reviews yet. Be the first to review this product.</p>
+        {% endfor %}
+      </section>
+
+      <section aria-labelledby="qa-title">
+        <h2 id="qa-title" class="ik-h2 mb-4">Questions &amp; answers</h2>
+        {% if user.is_authenticated %}
+        <form method="post" action="{% url 'storefront:add_product_question' product.slug %}" class="ik-panel ik-form flex flex-col gap-3 mb-4">
+          {% csrf_token %}
+          <label for="{{ question_form.question.id_for_label }}">Ask a question</label>
+          {{ question_form.question }}
+          {% for error in question_form.question.errors %}<p class="ik-error">{{ error }}</p>{% endfor %}
+          <button class="ik-btn ik-btn-secondary self-start">Post question</button>
+        </form>
+        {% else %}
+        <p class="ik-panel ik-muted mb-4"><a class="ik-link" href="{% url 'login' %}?next={{ request.path }}">Sign in</a> to ask a question.</p>
+        {% endif %}
+        {% for question in questions %}
+        <div class="ik-review">
+          <p class="font-semibold">Q. {{ question.question }}</p>
+          {% if question.answer %}
+          <p class="ik-muted mt-1">A. {{ question.answer }}</p>
+          {% else %}
+          <p class="ik-muted mt-1 italic">Awaiting answer</p>
           {% endif %}
         </div>
-        <h4 class="font-600 text-slate-900">{{ review.title }}</h4>
-        <p class="mt-2 text-slate-600 text-sm">{{ review.body }}</p>
-        <p class="mt-3 text-xs text-slate-500">{{ review.user.username }} • {{ review.created_at|date:'d M Y' }}</p>
-      </div>
-      {% empty %}
-      <p class="text-slate-500 text-center py-8">No reviews yet. Be the first to review this product.</p>
-      {% endfor %}
+        {% empty %}
+        <p class="ik-muted py-4">No questions yet.</p>
+        {% endfor %}
+      </section>
     </div>
-  </div>
 
-  <!-- Questions Section -->
-  <div class="mt-16 max-w-3xl">
-    <h2 class="text-2xl font-600 text-slate-900 mb-8">Questions & answers</h2>
-
-    <!-- Ask Question Form -->
-    {% if user.is_authenticated %}
-    <form method="post" action="{% url 'storefront:add_product_question' product.slug %}" class="bg-slate-50 rounded-lg p-6 mb-8">
-      {% csrf_token %}
-      <label class="block font-600 text-slate-900 mb-3">Ask a question</label>
-      {{ question_form.question }}
-      {% for error in question_form.question.errors %}
-      <p class="text-red-600 text-sm mt-2">{{ error }}</p>
-      {% endfor %}
-      <button class="btn btn-dark mt-4">Post question</button>
-    </form>
-    {% else %}
-    <p class="bg-slate-50 rounded-lg p-6 mb-8 text-sm text-slate-600">
-      <a class="font-600 text-slate-900 hover:underline" href="{% url 'login' %}?next={{ request.path }}">Sign in</a> to ask a question.
-    </p>
+    {% if frequently_bought or also_viewed %}
+    <aside class="flex flex-col gap-6 lg:sticky lg:top-24">
+      {% if frequently_bought %}
+      <section class="ik-sugg" aria-labelledby="fbt-title">
+        <div class="flex gap-3 items-start mb-4">
+          <span class="ik-sugg-spark">{% icon 'sparkle' 18 %}</span>
+          <div><h2 id="fbt-title" class="ik-h2">Goes well with</h2><p class="text-sm ik-muted">Often bought together with this item</p></div>
+        </div>
+        <div class="ik-sugg-grid">
+          {% for item in frequently_bought %}
+          <a class="ik-sugg-item" href="{{ item.get_absolute_url }}">
+            <div class="ik-media">{% if item.image %}<img src="{{ item.image.url }}" alt="" loading="lazy">{% else %}{% icon 'bag' %}{% endif %}</div>
+            <span class="text-sm font-medium">{{ item.name }}</span><span class="font-bold">₹{{ item.price }}</span>
+          </a>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+      {% if also_viewed %}
+      <section class="ik-sugg" aria-labelledby="av-title">
+        <div class="flex gap-3 items-start mb-4">
+          <span class="ik-sugg-spark">{% icon 'sparkle' 18 %}</span>
+          <div><h2 id="av-title" class="ik-h2">You might like</h2><p class="text-sm ik-muted">Shoppers who viewed this also looked at</p></div>
+        </div>
+        <div class="ik-sugg-grid">
+          {% for item in also_viewed %}
+          <a class="ik-sugg-item" href="{{ item.get_absolute_url }}">
+            <div class="ik-media">{% if item.image %}<img src="{{ item.image.url }}" alt="" loading="lazy">{% else %}{% icon 'bag' %}{% endif %}</div>
+            <span class="text-sm font-medium">{{ item.name }}</span><span class="font-bold">₹{{ item.price }}</span>
+          </a>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+    </aside>
     {% endif %}
-
-    <!-- Questions List -->
-    <div class="space-y-6">
-      {% for question in questions %}
-      <div class="border-b border-slate-200 pb-6">
-        <p class="font-600 text-slate-900">Q. {{ question.question }}</p>
-        {% if question.answer %}
-        <p class="mt-2 text-slate-600 text-sm">A. {{ question.answer }}</p>
-        {% else %}
-        <p class="mt-2 text-slate-400 text-sm italic">Awaiting answer</p>
-        {% endif %}
-      </div>
-      {% empty %}
-      <p class="text-slate-500 text-center py-8">No questions yet.</p>
-      {% endfor %}
-    </div>
   </div>
-
 </div>
 
 <script>
-  function changeProductImage(url) {
+  function changeProductImage(button, url) {
     document.getElementById("mainProductImage").src = url;
+    document.querySelectorAll(".ik-gallery-thumb").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
   }
 </script>
-
 {% endblock %}

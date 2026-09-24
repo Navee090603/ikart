@@ -1,216 +1,160 @@
-{% extends 'storefront/base.html' %}
+{% extends 'storefront/base.html' %}{% load storefront_extras %}
 {% block title %}Checkout | IKart{% endblock %}
 {% block content %}
-<div class="max-w-5xl mx-auto px-4 py-8">
-    <h1 class="text-3xl font-bold">Checkout</h1>
+<div class="ik-page">
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <h1 class="ik-h1">Checkout</h1>
+    <ol class="ik-steps" aria-label="Checkout progress">
+      <li class="ik-step ik-step-done"><span class="ik-step-dot" aria-hidden="true">{% icon 'check' 16 %}</span><span class="ik-step-label">Cart<span class="ik-sr"> (completed)</span></span></li>
+      <li class="ik-step ik-step-now" aria-current="step"><span class="ik-step-dot" aria-hidden="true">2</span><span class="ik-step-label">Details</span></li>
+      <li class="ik-step"><span class="ik-step-dot" aria-hidden="true">3</span><span class="ik-step-label">Payment</span></li>
+      <li class="ik-step"><span class="ik-step-dot" aria-hidden="true">4</span><span class="ik-step-label">Done</span></li>
+    </ol>
+  </div>
 
-    <form id="checkout-form" method="post" novalidate data-live-validate class="mt-6 grid md:grid-cols-[1fr_340px] gap-6">
-        {% csrf_token %}
-        {{ form.checkout_token }}
+  <form id="checkout-form" method="post" novalidate data-live-validate class="ik-form mt-6 grid gap-6 lg:gap-8 lg:grid-cols-[minmax(0,1fr)_380px] items-start">
+    {% csrf_token %}
+    {{ form.checkout_token }}
 
-        <div class="space-y-6">
+    <div class="flex flex-col gap-6">
+      {% if form.non_field_errors %}
+      <div class="ik-alert ik-alert-danger" role="alert">{% icon 'alert' %}<div>{{ form.non_field_errors }}</div></div>
+      {% endif %}
 
-            {% if form.non_field_errors %}
-            <div class="bg-red-50 text-red-700 text-sm rounded-lg p-4">
-                {{ form.non_field_errors }}
-            </div>
-            {% endif %}
-
-            <section class="bg-white rounded-xl p-6">
-                <div class="flex items-center justify-between flex-wrap gap-2">
-                    <h2 class="font-bold text-lg flex items-center gap-2">
-                        <span class="w-6 h-6 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center shrink-0">1</span>
-                        Delivery address
-                    </h2>
-
-                    {% if user.is_authenticated %}
-                    <a class="text-sm text-amber-700 hover:underline" href="{% url 'storefront:addresses' %}">Manage saved addresses</a>
-                    {% endif %}
-                </div>
-
-                <div class="mt-4">
-                    <label class="block text-sm font-medium mb-1" for="{{ form.email.id_for_label }}">Email</label>
-                    {{ form.email }}
-                    <div id="{{ form.email.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.email.errors %} hidden{% endif %}">
-                        {{ form.email.errors.0 }}
-                    </div>
-
-                    {% if not user.is_authenticated %}
-                    <div id="email-registered-notice" class="hidden text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 mt-2">
-                        An account already exists with this email.
-                        <a class="font-semibold underline" href="{% url 'login' %}?next={% url 'storefront:checkout' %}">Sign in</a>
-                        to track this order and use your saved addresses.
-                    </div>
-                    {% endif %}
-                </div>
-
-                {% if form.saved_address %}
-                <div class="grid sm:grid-cols-2 gap-3 mt-4">
-                    {% for address in form.fields.saved_address.queryset %}
-                    <label class="option-card">
-                        <input type="radio" name="saved_address" value="{{ address.pk }}" class="w-auto accent-amber-500 mt-1 shrink-0" {% if form.saved_address.value|stringformat:"s" == address.pk|stringformat:"s" %}checked{% endif %}>
-
-                        <span class="text-sm">
-                            <span class="font-semibold flex items-center gap-2">
-                                {{ address.full_name }}
-                                {% if address.is_default %}<span class="text-xs bg-amber-100 px-2 py-0.5 rounded">Default</span>{% endif %}
-                            </span>
-
-                            <span class="block text-slate-600 mt-1">
-                                {{ address.line1 }}{% if address.line2 %}, {{ address.line2 }}{% endif %}<br>
-                                {{ address.city }}, {{ address.state }} {{ address.postal_code }}<br>
-                                {{ address.phone }}
-                            </span>
-                        </span>
-                    </label>
-                    {% endfor %}
-
-                    <label class="option-card items-center justify-center text-amber-700 font-medium border-dashed">
-                        <input type="radio" name="saved_address" value="" class="w-auto accent-amber-500 shrink-0" {% if not form.saved_address.value %}checked{% endif %}>
-                        + Use a new address
-                    </label>
-                </div>
-                {% endif %}
-
-                <div id="new-address-fields" class="grid sm:grid-cols-2 gap-4 mt-4{% if form.saved_address and form.saved_address.value %} hidden{% endif %}">
-                    <div>
-                        <label class="block text-sm font-medium mb-1" for="{{ form.full_name.id_for_label }}">Full name</label>
-                        {{ form.full_name }}
-                        <div id="{{ form.full_name.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.full_name.errors %} hidden{% endif %}">
-                            {{ form.full_name.errors.0 }}
-                        </div>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium mb-1" for="{{ form.phone.id_for_label }}">Phone</label>
-                        {{ form.phone }}
-                        <div id="{{ form.phone.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.phone.errors %} hidden{% endif %}">
-                            {{ form.phone.errors.0 }}
-                        </div>
-                    </div>
-
-                    <div class="sm:col-span-2">
-                        <label class="block text-sm font-medium mb-1" for="{{ form.address_line1.id_for_label }}">Address line 1</label>
-                        {{ form.address_line1 }}
-                        <div id="{{ form.address_line1.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.address_line1.errors %} hidden{% endif %}">
-                            {{ form.address_line1.errors.0 }}
-                        </div>
-                    </div>
-
-                    <div class="sm:col-span-2">
-                        <label class="block text-sm font-medium mb-1" for="{{ form.address_line2.id_for_label }}">Address line 2 <span class="text-slate-400 font-normal">(optional)</span></label>
-                        {{ form.address_line2 }}
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium mb-1" for="{{ form.city.id_for_label }}">City</label>
-                        {{ form.city }}
-                        <div id="{{ form.city.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.city.errors %} hidden{% endif %}">
-                            {{ form.city.errors.0 }}
-                        </div>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium mb-1" for="{{ form.state.id_for_label }}">State</label>
-                        {{ form.state }}
-                        <div id="{{ form.state.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.state.errors %} hidden{% endif %}">
-                            {{ form.state.errors.0 }}
-                        </div>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium mb-1" for="{{ form.postal_code.id_for_label }}">Postal code</label>
-                        {{ form.postal_code }}
-                        <div id="{{ form.postal_code.id_for_label }}-error" class="text-sm text-red-600 mt-1{% if not form.postal_code.errors %} hidden{% endif %}">
-                            {{ form.postal_code.errors.0 }}
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <section class="bg-white rounded-xl p-6">
-                <h2 class="font-bold text-lg flex items-center gap-2">
-                    <span class="w-6 h-6 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center shrink-0">2</span>
-                    Delivery option
-                </h2>
-
-                <div class="space-y-3 mt-4">
-                    {% for radio in form.delivery_option %}
-                    <label class="option-card items-center">
-                        {{ radio.tag }}
-                        <span>{{ radio.choice_label }}</span>
-                    </label>
-                    {% endfor %}
-                </div>
-            </section>
-
-            <section class="bg-white rounded-xl p-6">
-                <h2 class="font-bold text-lg flex items-center gap-2">
-                    <span class="w-6 h-6 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center shrink-0">3</span>
-                    Payment method
-                </h2>
-
-                <div class="space-y-3 mt-4">
-                    {% for radio in form.payment_method %}
-                    <label class="option-card items-center">
-                        {{ radio.tag }}
-                        <span>{{ radio.choice_label }}</span>
-                    </label>
-                    {% endfor %}
-                </div>
-
-                {% if form.payment_method.errors %}
-                <p class="text-red-600 text-sm mt-2">{{ form.payment_method.errors.0 }}</p>
-                {% endif %}
-
-                <p class="text-xs text-slate-500 mt-3">Cash on delivery is available. Card and UPI are processed securely by Razorpay when online payment is selected.</p>
-            </section>
+      <section class="ik-panel" aria-labelledby="addr-title">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <h2 id="addr-title" class="ik-h2 flex items-center gap-3"><span class="ik-step-num">1</span>Delivery address</h2>
+          {% if user.is_authenticated %}<a class="ik-link text-sm" href="{% url 'storefront:addresses' %}">Manage saved addresses</a>{% endif %}
         </div>
 
-        <aside class="bg-white rounded-xl p-5 h-fit md:sticky md:top-20">
-            <h2 class="font-bold text-xl">Order summary</h2>
+        <div class="ik-field mt-4">
+          <label for="{{ form.email.id_for_label }}">Email</label>
+          {{ form.email }}
+          <p id="{{ form.email.id_for_label }}-error" class="ik-error{% if not form.email.errors %} hidden{% endif %}">{{ form.email.errors.0 }}</p>
+          {% if not user.is_authenticated %}
+          <div id="email-registered-notice" class="hidden ik-alert ik-alert-warning mt-2">
+            {% icon 'user' %}
+            <p>An account already exists with this email. <a href="{% url 'login' %}?next={% url 'storefront:checkout' %}">Sign in</a> to track this order and use your saved addresses.</p>
+          </div>
+          {% endif %}
+        </div>
 
-            <div class="space-y-3 mt-4">
-                {% for item in cart %}
-                <div class="flex gap-3">
-                    <div class="w-14 h-14 bg-slate-100 shrink-0 rounded overflow-hidden">
-                        {% if item.product.image %}<img class="w-full h-full object-cover" src="{{ item.product.image.url }}" alt="{{ item.product.name }}">{% endif %}
-                    </div>
+        {% if form.saved_address %}
+        <div class="grid sm:grid-cols-2 gap-3 mt-4" role="radiogroup" aria-label="Saved addresses">
+          {% for address in form.fields.saved_address.queryset %}
+          <label class="ik-option">
+            <input type="radio" name="saved_address" value="{{ address.pk }}" {% if form.saved_address.value|stringformat:"s" == address.pk|stringformat:"s" %}checked{% endif %}>
+            <span class="text-sm">
+              <span class="font-semibold flex items-center gap-2 text-base">{{ address.full_name }}{% if address.is_default %}<span class="ik-badge ik-badge-brand">Default</span>{% endif %}</span>
+              <span class="block ik-muted mt-1">
+                {{ address.line1 }}{% if address.line2 %}, {{ address.line2 }}{% endif %}<br>
+                {{ address.city }}, {{ address.state }} {{ address.postal_code }}<br>
+                {{ address.phone }}
+              </span>
+            </span>
+          </label>
+          {% endfor %}
+          <label class="ik-option ik-option-new">
+            <input type="radio" name="saved_address" value="" {% if not form.saved_address.value %}checked{% endif %}>
+            {% icon 'plus' 18 %}Use a new address
+          </label>
+        </div>
+        {% endif %}
 
-                    <div class="flex-1 text-sm">
-                        <a class="font-medium hover:underline" href="{{ item.product.get_absolute_url }}">{{ item.product.name }}</a>
-                        {% if item.variant %}<div class="text-slate-500">{{ item.variant.label }}</div>{% endif %}
-                        <div class="text-slate-500">Qty {{ item.quantity }}</div>
-                    </div>
+        <div id="new-address-fields" class="grid sm:grid-cols-2 gap-4 mt-4{% if form.saved_address and form.saved_address.value %} hidden{% endif %}">
+          <div class="ik-field">
+            <label for="{{ form.full_name.id_for_label }}">Full name</label>
+            {{ form.full_name }}
+            <p id="{{ form.full_name.id_for_label }}-error" class="ik-error{% if not form.full_name.errors %} hidden{% endif %}">{{ form.full_name.errors.0 }}</p>
+          </div>
+          <div class="ik-field">
+            <label for="{{ form.phone.id_for_label }}">Phone</label>
+            {{ form.phone }}
+            <p id="{{ form.phone.id_for_label }}-error" class="ik-error{% if not form.phone.errors %} hidden{% endif %}">{{ form.phone.errors.0 }}</p>
+          </div>
+          <div class="ik-field sm:col-span-2">
+            <label for="{{ form.address_line1.id_for_label }}">Address line 1</label>
+            {{ form.address_line1 }}
+            <p id="{{ form.address_line1.id_for_label }}-error" class="ik-error{% if not form.address_line1.errors %} hidden{% endif %}">{{ form.address_line1.errors.0 }}</p>
+          </div>
+          <div class="ik-field sm:col-span-2">
+            <label for="{{ form.address_line2.id_for_label }}">Address line 2 <span class="ik-optional">(optional)</span></label>
+            {{ form.address_line2 }}
+          </div>
+          <div class="ik-field">
+            <label for="{{ form.city.id_for_label }}">City</label>
+            {{ form.city }}
+            <p id="{{ form.city.id_for_label }}-error" class="ik-error{% if not form.city.errors %} hidden{% endif %}">{{ form.city.errors.0 }}</p>
+          </div>
+          <div class="ik-field">
+            <label for="{{ form.state.id_for_label }}">State</label>
+            {{ form.state }}
+            <p id="{{ form.state.id_for_label }}-error" class="ik-error{% if not form.state.errors %} hidden{% endif %}">{{ form.state.errors.0 }}</p>
+          </div>
+          <div class="ik-field">
+            <label for="{{ form.postal_code.id_for_label }}">Postal code</label>
+            {{ form.postal_code }}
+            <p id="{{ form.postal_code.id_for_label }}-error" class="ik-error{% if not form.postal_code.errors %} hidden{% endif %}">{{ form.postal_code.errors.0 }}</p>
+          </div>
+        </div>
+      </section>
 
-                    <div class="text-sm font-semibold">₹{{ item.total }}</div>
-                </div>
-                {% endfor %}
-            </div>
+      <section class="ik-panel" aria-labelledby="delivery-title">
+        <h2 id="delivery-title" class="ik-h2 flex items-center gap-3"><span class="ik-step-num">2</span>Delivery option</h2>
+        <div class="flex flex-col gap-3 mt-4" role="radiogroup" aria-labelledby="delivery-title">
+          {% for radio in form.delivery_option %}
+          <label class="ik-option items-center">{{ radio.tag }}<span>{{ radio.choice_label }}</span></label>
+          {% endfor %}
+        </div>
+      </section>
 
-            <div class="border-t mt-4 pt-3">
-                <label class="text-sm font-medium" for="{{ form.coupon_code.id_for_label }}">Coupon code</label>
+      <section class="ik-panel" aria-labelledby="payment-title">
+        <h2 id="payment-title" class="ik-h2 flex items-center gap-3"><span class="ik-step-num">3</span>Payment method</h2>
+        <div class="flex flex-col gap-3 mt-4" role="radiogroup" aria-labelledby="payment-title">
+          {% for radio in form.payment_method %}
+          <label class="ik-option items-center">{{ radio.tag }}<span>{{ radio.choice_label }}</span></label>
+          {% endfor %}
+        </div>
+        {% if form.payment_method.errors %}<p class="ik-error">{{ form.payment_method.errors.0 }}</p>{% endif %}
+        <p class="text-sm ik-muted mt-3">Cash on delivery is available. Card and UPI are processed securely by Razorpay when online payment is selected.</p>
+      </section>
+    </div>
 
-                <div class="flex mt-1">
-                    {{ form.coupon_code }}
-                    <button type="button" id="apply-coupon" class="bg-slate-900 text-white px-3 rounded-r text-sm shrink-0">Apply</button>
-                </div>
-
-                <p class="coupon-live-error text-red-600 text-sm mt-1">{% if form.coupon_code.errors %}{{ form.coupon_code.errors.0 }}{% endif %}</p>
-            </div>
-
-            <div class="border-t mt-4 pt-3 space-y-2">
-                <div class="flex justify-between"><span>Subtotal</span><span id="quote-subtotal">₹{{ quote.subtotal }}</span></div>
-                <div class="flex justify-between"><span>Discount</span><span id="quote-discount" class="text-emerald-700">− ₹{{ quote.discount_amount }}</span></div>
-                <div class="flex justify-between"><span>Delivery</span><span id="quote-delivery">₹{{ quote.delivery_fee }}</span></div>
-                <div class="flex justify-between"><span>Tax</span><span id="quote-tax">₹{{ quote.tax_amount }}</span></div>
-                <div class="flex justify-between font-bold text-lg border-t pt-2"><span>Final total</span><span id="quote-total">₹{{ quote.total }}</span></div>
-            </div>
-
-            <button class="btn btn-primary w-full mt-5">Place order</button>
-            <p class="text-xs text-slate-500 mt-3 text-center">Secure, SSL-encrypted checkout</p>
-        </aside>
-    </form>
+    <aside class="ik-panel lg:sticky lg:top-24 flex flex-col gap-4" aria-labelledby="summary-title">
+      <h2 id="summary-title" class="ik-h2">Order summary</h2>
+      <div class="flex flex-col gap-3">
+        {% for item in cart %}
+        <div class="ik-mini">
+          <div class="ik-media ik-thumb">{% if item.product.image %}<img src="{{ item.product.image.url }}" alt="{{ item.product.name }}">{% else %}{% icon 'bag' 18 %}{% endif %}</div>
+          <div class="min-w-0">
+            <a class="hover:underline" href="{{ item.product.get_absolute_url }}">{{ item.product.name }}</a>
+            {% if item.variant %}<div class="ik-muted">{{ item.variant.label }}</div>{% endif %}
+            <div class="ik-muted">Qty {{ item.quantity }}</div>
+          </div>
+          <b>₹{{ item.total }}</b>
+        </div>
+        {% endfor %}
+      </div>
+      <hr class="ik-rule">
+      <div>
+        <label for="{{ form.coupon_code.id_for_label }}">Coupon code</label>
+        <div class="ik-inline-form">
+          {{ form.coupon_code }}
+          <button type="button" id="apply-coupon" class="ik-btn ik-btn-secondary">Apply</button>
+        </div>
+        <p class="coupon-live-error ik-error" role="status">{% if form.coupon_code.errors %}{{ form.coupon_code.errors.0 }}{% endif %}</p>
+      </div>
+      <dl class="ik-sum">
+        <div><dt>Subtotal</dt><dd id="quote-subtotal">₹{{ quote.subtotal }}</dd></div>
+        <div class="ik-sum-save"><dt>Discount</dt><dd id="quote-discount">− ₹{{ quote.discount_amount }}</dd></div>
+        <div><dt>Delivery</dt><dd id="quote-delivery">₹{{ quote.delivery_fee }}</dd></div>
+        <div><dt>Tax</dt><dd id="quote-tax">₹{{ quote.tax_amount }}</dd></div>
+        <div class="ik-sum-total"><dt>Final total</dt><dd id="quote-total">₹{{ quote.total }}</dd></div>
+      </dl>
+      <button class="ik-btn ik-btn-primary ik-btn-lg ik-btn-block">Place order</button>
+      <p class="text-sm ik-muted text-center flex items-center justify-center gap-2">{% icon 'lock' 16 %}Secure, SSL-encrypted checkout</p>
+    </aside>
+  </form>
 </div>
 <script>
 const csrf = () => document.querySelector('[name=csrfmiddlewaretoken]').value;

@@ -1,3 +1,39 @@
-{% extends 'storefront/base.html' %}
+{% extends 'storefront/account_base.html' %}{% load storefront_extras %}
 {% block title %}Help & support | IKart{% endblock %}
-{% block content %}<div class="max-w-6xl mx-auto px-4 py-8 grid md:grid-cols-[1fr_420px] gap-8"><section><h1 class="text-3xl font-bold">Help & support</h1><h2 class="text-xl font-bold mt-7">Frequently asked questions</h2><div class="space-y-3 mt-4">{% for faq in faqs %}<details class="bg-white rounded-xl p-4"><summary class="font-semibold">{{ faq.question }}</summary><p class="text-slate-600 mt-3 whitespace-pre-line">{{ faq.answer }}</p></details>{% empty %}<p class="text-slate-500">FAQs will appear here soon.</p>{% endfor %}</div><h2 class="text-xl font-bold mt-8">Your support tickets</h2><div class="space-y-2 mt-3">{% for ticket in tickets %}<a class="block bg-white rounded-xl p-4 hover:shadow-sm" href="{% url 'storefront:support_ticket' ticket.id %}"><strong>#{{ ticket.id }} · {{ ticket.subject }}</strong><span class="float-right text-sm">{{ ticket.get_status_display }}</span><p class="text-sm text-slate-500 mt-1">Updated {{ ticket.updated_at|date:'d M Y' }}</p></a>{% empty %}<p class="text-slate-500">You have no support tickets.</p>{% endfor %}</div></section><section class="bg-white rounded-xl p-6 h-fit"><h2 class="text-xl font-bold">Contact support</h2><form method="post" class="space-y-3 mt-4">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary">Create ticket</button></form></section></div>{% endblock %}
+{% block account_content %}
+<h1 class="ik-h1">Help &amp; support</h1>
+<div class="grid xl:grid-cols-[minmax(0,1fr)_400px] gap-6 items-start">
+  <div class="flex flex-col gap-8">
+    <section aria-labelledby="faq-title">
+      <h2 id="faq-title" class="ik-h2 mb-3">Frequently asked questions</h2>
+      <div class="ik-card-acc">
+        {% for faq in faqs %}
+        <details class="ik-acc{% if forloop.last %} border-b-0{% endif %}">
+          <summary>{{ faq.question }} {% icon 'chevron-down' %}</summary>
+          <p class="ik-acc-body whitespace-pre-line">{{ faq.answer }}</p>
+        </details>
+        {% empty %}
+        <p class="ik-muted py-4">FAQs will appear here soon.</p>
+        {% endfor %}
+      </div>
+    </section>
+    <section aria-labelledby="tickets-title">
+      <h2 id="tickets-title" class="ik-h2 mb-3">Your support tickets</h2>
+      <div class="flex flex-col gap-2">
+        {% for ticket in tickets %}
+        <a class="ik-panel !py-4 flex items-center justify-between gap-4 no-underline hover:border-brand" href="{% url 'storefront:support_ticket' ticket.id %}">
+          <span><strong>#{{ ticket.id }} · {{ ticket.subject }}</strong><span class="block text-sm ik-muted mt-1">Updated {{ ticket.updated_at|date:'d M Y' }}</span></span>
+          <span class="ik-badge">{{ ticket.get_status_display }}</span>
+        </a>
+        {% empty %}
+        <p class="ik-muted">You have no support tickets.</p>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+  <section class="ik-panel" aria-labelledby="contact-title">
+    <h2 id="contact-title" class="ik-h2">Contact support</h2>
+    <form method="post" class="ik-form mt-4">{% csrf_token %}{{ form.as_p }}<button class="ik-btn ik-btn-primary">Create ticket</button></form>
+  </section>
+</div>
+{% endblock %}

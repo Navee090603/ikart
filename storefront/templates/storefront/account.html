@@ -1,3 +1,29 @@
-{% extends 'storefront/base.html' %}
+{% extends 'storefront/account_base.html' %}{% load storefront_extras %}
 {% block title %}My account | IKart{% endblock %}
-{% block content %}<div class="max-w-xl mx-auto px-4 py-10"><h1 class="text-2xl font-bold">My account</h1><div class="bg-white rounded-xl p-6 mt-6 space-y-4"><div><label class="block font-medium mb-1 text-slate-500">Username</label><p class="text-slate-900">{{ user.username }}</p></div><div><label class="block font-medium mb-1 text-slate-500">Email</label><p class="text-slate-900">{{ user.email }}</p></div><form method="post" class="pt-2 border-t">{% csrf_token %}<label class="block font-medium mb-1" for="{{ form.phone.id_for_label }}">Mobile number</label>{{ form.phone }}{% for error in form.phone.errors %}<p class="text-red-600 text-sm mt-1">{{ error }}</p>{% endfor %}<button class="btn btn-primary mt-4">Save changes</button></form></div><div class="bg-white rounded-xl p-6 mt-4"><h2 class="font-bold text-lg">Password</h2><p class="text-slate-600 text-sm mt-1">Change the password you use to sign in.</p><a class="btn btn-dark mt-3 inline-block" href="{% url 'password_change' %}">Change password</a></div><div class="bg-white rounded-xl p-6 mt-4"><h2 class="font-bold text-lg">Manage</h2><a class="block mt-2 text-amber-700" href="{% url 'storefront:addresses' %}">Delivery addresses</a><a class="block mt-2 text-amber-700" href="{% url 'storefront:order_history' %}">Order history</a><a class="block mt-2 text-amber-700" href="{% url 'storefront:wishlist' %}">Wishlist</a><a class="block mt-2 text-amber-700" href="{% url 'storefront:notification_preferences' %}">Notification preferences</a></div></div>{% endblock %}
+{% block account_content %}
+<h1 class="ik-h1">My account</h1>
+<section class="ik-panel flex flex-col gap-5" aria-labelledby="details-title">
+  <h2 id="details-title" class="ik-h2">Your details</h2>
+  <dl class="grid sm:grid-cols-2 gap-4">
+    <div><dt class="ik-label ik-muted">Username</dt><dd class="m-0">{{ user.username }}</dd></div>
+    <div><dt class="ik-label ik-muted">Email</dt><dd class="m-0 break-all">{{ user.email }}</dd></div>
+  </dl>
+  <hr class="ik-rule">
+  <form method="post" class="ik-form flex flex-col gap-3 max-w-sm">
+    {% csrf_token %}
+    <div class="ik-field">
+      <label for="{{ form.phone.id_for_label }}">Mobile number</label>
+      {{ form.phone }}
+      {% for error in form.phone.errors %}<p class="ik-error">{{ error }}</p>{% endfor %}
+    </div>
+    <button class="ik-btn ik-btn-primary self-start">Save changes</button>
+  </form>
+</section>
+<section class="ik-panel flex flex-wrap items-center justify-between gap-4" aria-labelledby="pw-title">
+  <div>
+    <h2 id="pw-title" class="ik-h2">Password</h2>
+    <p class="ik-muted text-sm mt-1">Change the password you use to sign in.</p>
+  </div>
+  <a class="ik-btn ik-btn-secondary" href="{% url 'password_change' %}">{% icon 'lock' 18 %}Change password</a>
+</section>
+{% endblock %}

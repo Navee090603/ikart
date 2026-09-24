@@ -1,3 +1,12 @@
-{% extends 'storefront/base.html' %}
+{% extends 'storefront/account_base.html' %}{% load storefront_extras %}
 {% block title %}Request {{ request_type }} | IKart{% endblock %}
-{% block content %}<div class="max-w-xl mx-auto px-4 py-10"><form method="post" class="bg-white rounded-xl p-6 space-y-4">{% csrf_token %}<h1 class="text-2xl font-bold">Request {{ request_type }}</h1><p class="text-slate-600">Order {{ order.number }}</p>{{ form.as_p }}<button class="btn btn-primary">Submit request</button></form></div>{% endblock %}
+{% block account_content %}
+<a class="ik-link text-sm inline-flex items-center gap-1 self-start" href="{% url 'storefront:order_confirmation' order.number %}">{% icon 'chevron-left' 16 %}Order {{ order.number }}</a>
+<form method="post" class="ik-panel ik-form max-w-xl">
+  {% csrf_token %}
+  <h1 class="ik-h1">Request {{ request_type }}</h1>
+  <p class="ik-muted mt-1 mb-5">Order {{ order.number }}</p>
+  {{ form.as_p }}
+  <button class="ik-btn ik-btn-primary">Submit request</button>
+</form>
+{% endblock %}

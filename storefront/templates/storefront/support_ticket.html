@@ -1,3 +1,23 @@
-{% extends 'storefront/base.html' %}
+{% extends 'storefront/account_base.html' %}{% load storefront_extras %}
 {% block title %}Support ticket #{{ ticket.id }} | IKart{% endblock %}
-{% block content %}<div class="max-w-3xl mx-auto px-4 py-10"><a class="text-sm text-amber-700" href="{% url 'storefront:support' %}">← Support centre</a><article class="bg-white rounded-xl p-6 mt-3"><div class="flex justify-between gap-3"><h1 class="text-2xl font-bold">{{ ticket.subject }}</h1><span>{{ ticket.get_status_display }}</span></div><p class="text-sm text-slate-500 mt-2">{{ ticket.get_category_display }} · {{ ticket.created_at|date:'d M Y' }}</p><p class="whitespace-pre-line mt-5">{{ ticket.message }}</p></article><div class="space-y-3 mt-5">{% for reply in ticket.replies.all %}<article class="bg-white rounded-xl p-5"><strong>{{ reply.author.username }}</strong><p class="whitespace-pre-line mt-2">{{ reply.message }}</p><p class="text-xs text-slate-400 mt-2">{{ reply.created_at|date:'d M Y, H:i' }}</p></article>{% empty %}<p class="text-slate-500">Our team will reply here.</p>{% endfor %}</div></div>{% endblock %}
+{% block account_content %}
+<a class="ik-link text-sm inline-flex items-center gap-1 self-start" href="{% url 'storefront:support' %}">{% icon 'chevron-left' 16 %}Support centre</a>
+<article class="ik-panel">
+  <div class="flex flex-wrap justify-between items-start gap-3">
+    <h1 class="ik-h1">{{ ticket.subject }}</h1>
+    <span class="ik-badge ik-badge-brand">{{ ticket.get_status_display }}</span>
+  </div>
+  <p class="text-sm ik-muted mt-2">#{{ ticket.id }} · {{ ticket.get_category_display }} · {{ ticket.created_at|date:'d M Y' }}</p>
+  <p class="ik-prose whitespace-pre-line mt-5">{{ ticket.message }}</p>
+</article>
+<section class="flex flex-col gap-3" aria-label="Replies">
+  {% for reply in ticket.replies.all %}
+  <article class="ik-panel">
+    <div class="flex items-center gap-2"><span class="ik-trust-icon !w-9 !h-9">{% icon 'user' 18 %}</span><strong>{{ reply.author.username }}</strong><span class="text-xs ik-muted ml-auto">{{ reply.created_at|date:'d M Y, H:i' }}</span></div>
+    <p class="ik-prose whitespace-pre-line mt-3">{{ reply.message }}</p>
+  </article>
+  {% empty %}
+  <div class="ik-alert">{% icon 'info' %}<p>Our team will reply here.</p></div>
+  {% endfor %}
+</section>
+{% endblock %}

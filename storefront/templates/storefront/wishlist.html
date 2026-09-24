@@ -1,3 +1,25 @@
-{% extends 'storefront/base.html' %}
+{% extends 'storefront/account_base.html' %}{% load storefront_extras %}
 {% block title %}Wishlist | IKart{% endblock %}
-{% block content %}<div class="max-w-7xl mx-auto px-4 py-8"><h1 class="text-3xl font-bold">Your wishlist</h1><div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">{% for item in items %}<div class="relative">{% with product=item.product %}{% include 'storefront/_product_card.html' %}{% endwith %}<form method="post" action="{% url 'storefront:toggle_wishlist' item.product.id %}" class="mt-2">{% csrf_token %}<input type="hidden" name="next" value="{% url 'storefront:wishlist' %}"><button class="text-sm text-red-700">Remove</button></form></div>{% empty %}<div class="col-span-full bg-white rounded-xl p-8">Your wishlist is empty. <a class="text-amber-700" href="{% url 'storefront:product_list' %}">Discover products</a>.</div>{% endfor %}</div></div>{% endblock %}
+{% block account_content %}
+<h1 class="ik-h1">Your wishlist</h1>
+{% if items %}
+<div class="ik-grid">
+  {% for item in items %}
+  <div class="flex flex-col gap-2">
+    {% with product=item.product %}{% include 'storefront/_product_card.html' %}{% endwith %}
+    <form method="post" action="{% url 'storefront:toggle_wishlist' item.product.id %}">
+      {% csrf_token %}<input type="hidden" name="next" value="{% url 'storefront:wishlist' %}">
+      <button class="ik-btn ik-btn-danger ik-btn-sm">{% icon 'trash' 18 %}Remove</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="ik-empty">
+  <span class="ik-empty-icon">{% icon 'heart' 28 %}</span>
+  <p class="ik-empty-title">Your wishlist is empty.</p>
+  <p class="ik-empty-text">Tap the heart on any product to keep it here.</p>
+  <a class="ik-btn ik-btn-primary mt-2" href="{% url 'storefront:product_list' %}">Discover products</a>
+</div>
+{% endif %}
+{% endblock %}

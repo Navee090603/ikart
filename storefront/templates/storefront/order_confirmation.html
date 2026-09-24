@@ -1,133 +1,105 @@
-{% extends 'storefront/base.html' %}
+{% extends 'storefront/base.html' %}{% load storefront_extras %}
 {% block title %}Order {{ order.number }} | IKart{% endblock %}
 {% block content %}
-<div class="max-w-3xl mx-auto px-4 py-10">
-    {% if user.is_authenticated and order.user == user %}
-    <a class="text-sm text-amber-700 hover:underline" href="{% url 'storefront:order_history' %}">&larr; Back to your orders</a>
-    {% else %}
-    <a class="text-sm text-amber-700 hover:underline" href="{% url 'storefront:product_list' %}">&larr; Continue shopping</a>
+<div class="ik-page ik-page-narrow flex flex-col gap-4">
+  {% if user.is_authenticated and order.user == user %}
+  <a class="ik-link text-sm inline-flex items-center gap-1 self-start" href="{% url 'storefront:order_history' %}">{% icon 'chevron-left' 16 %}Back to your orders</a>
+  {% else %}
+  <a class="ik-link text-sm inline-flex items-center gap-1 self-start" href="{% url 'storefront:product_list' %}">{% icon 'chevron-left' 16 %}Continue shopping</a>
+  {% endif %}
+
+  <article class="ik-panel flex flex-col gap-8 md:!p-8">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <span class="ik-auth-icon ik-auth-icon-ok mb-3">{% icon 'check' 28 %}</span>
+        <h1 class="ik-h1">Order {{ order.number }}</h1>
+        <p class="ik-muted text-sm mt-1">Placed on {{ order.created_at|date:'d M Y, H:i' }}</p>
+      </div>
+      <span class="ik-badge {{ order.status_badge_class }}">{{ order.get_status_display }}</span>
+    </div>
+
+    {% if tracking_steps %}
+    <ol class="ik-track" aria-label="Order progress">
+      {% for step in tracking_steps %}
+      <li class="ik-track-step {% if step.current %}ik-track-now{% elif step.done %}ik-track-done{% endif %}" {% if step.current %}aria-current="step"{% endif %}>
+        <span class="ik-track-dot" aria-hidden="true">{% if step.done and not step.current %}{% icon 'check' 16 %}{% else %}{{ forloop.counter }}{% endif %}</span>
+        <span class="ik-track-label">{{ step.label }}</span>
+      </li>
+      {% endfor %}
+    </ol>
+    {% elif order.status == 'cancellation_requested' %}
+    <div class="ik-alert ik-alert-warning">{% icon 'info' %}<p>Cancellation requested — we'll confirm shortly.</p></div>
+    {% elif order.status == 'cancelled' %}
+    <div class="ik-alert ik-alert-danger">{% icon 'alert' %}<p>This order was cancelled.</p></div>
+    {% elif order.status == 'return_requested' %}
+    <div class="ik-alert ik-alert-warning">{% icon 'info' %}<p>Return requested — we'll confirm shortly.</p></div>
+    {% elif order.status == 'refunded' %}
+    <div class="ik-alert ik-alert-success">{% icon 'check-circle' %}<p>This order has been refunded.</p></div>
+    {% elif order.status == 'payment_pending' %}
+    <div class="ik-alert ik-alert-warning">{% icon 'info' %}<p>Payment pending — we'll update this page once it's confirmed.</p></div>
+    {% elif order.status == 'payment_failed' %}
+    <div class="ik-alert ik-alert-danger">{% icon 'alert' %}<p>Payment failed for this order.</p></div>
     {% endif %}
 
-    <div class="bg-white rounded-xl p-6 sm:p-8 mt-3">
-
-        <div class="flex flex-wrap items-start justify-between gap-3">
-            <div>
-                <div class="text-3xl">✓</div>
-                <h1 class="text-2xl sm:text-3xl font-bold mt-2">Order {{ order.number }}</h1>
-                <p class="text-sm text-slate-500 mt-1">Placed on {{ order.created_at|date:'d M Y, H:i' }}</p>
-            </div>
-
-            <span class="text-sm font-medium px-3 py-1 rounded-full {{ order.status_badge_class }}">{{ order.get_status_display }}</span>
+    <div class="grid md:grid-cols-[1.2fr_1fr] gap-8">
+      <section aria-labelledby="items-title">
+        <h2 id="items-title" class="ik-eyebrow mb-3">Items</h2>
+        <div class="flex flex-col gap-3">
+          {% for item in order.items.all %}
+          <div class="ik-mini">
+            <div class="ik-media ik-thumb">{% if item.product.image %}<img src="{{ item.product.image.url }}" alt="{{ item.product_name }}">{% else %}{% icon 'bag' 18 %}{% endif %}</div>
+            <div class="min-w-0"><b>{{ item.product_name }}</b>{% if item.variant_label %}<div class="ik-muted">{{ item.variant_label }}</div>{% endif %}<div class="ik-muted">Qty {{ item.quantity }}</div></div>
+            <b>₹{{ item.total }}</b>
+          </div>
+          {% endfor %}
         </div>
-
-        {% if tracking_steps %}
-        <div class="mt-8">
-            <div class="flex items-start">
-                {% for step in tracking_steps %}
-                <div class="flex items-center {% if not forloop.last %}flex-1{% endif %}">
-                    <div class="flex flex-col items-center w-20 shrink-0">
-                        <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold {% if step.done %}bg-amber-500 text-white{% else %}bg-slate-200 text-slate-500{% endif %}">
-                            {% if step.done and not step.current %}✓{% else %}{{ forloop.counter }}{% endif %}
-                        </div>
-                        <span class="text-xs mt-2 text-center {% if step.current %}font-semibold text-slate-900{% else %}text-slate-500{% endif %}">{{ step.label }}</span>
-                    </div>
-
-                    {% if not forloop.last %}<div class="flex-1 h-0.5 mx-1 mt-4 {% if step.done %}bg-amber-500{% else %}bg-slate-200{% endif %}"></div>{% endif %}
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-        {% elif order.status == 'cancellation_requested' %}
-        <div class="mt-6 bg-amber-50 text-amber-800 rounded-lg p-4 text-sm">Cancellation requested — we'll confirm shortly.</div>
-        {% elif order.status == 'cancelled' %}
-        <div class="mt-6 bg-red-50 text-red-700 rounded-lg p-4 text-sm">This order was cancelled.</div>
-        {% elif order.status == 'return_requested' %}
-        <div class="mt-6 bg-amber-50 text-amber-800 rounded-lg p-4 text-sm">Return requested — we'll confirm shortly.</div>
-        {% elif order.status == 'refunded' %}
-        <div class="mt-6 bg-emerald-50 text-emerald-800 rounded-lg p-4 text-sm">This order has been refunded.</div>
-        {% elif order.status == 'payment_pending' %}
-        <div class="mt-6 bg-amber-50 text-amber-800 rounded-lg p-4 text-sm">Payment pending — we'll update this page once it's confirmed.</div>
-        {% elif order.status == 'payment_failed' %}
-        <div class="mt-6 bg-red-50 text-red-700 rounded-lg p-4 text-sm">Payment failed for this order.</div>
-        {% endif %}
-
-        <div class="grid sm:grid-cols-2 gap-6 mt-8">
-            <div>
-                <h2 class="font-bold text-sm text-slate-500 uppercase tracking-wide">Items</h2>
-
-                <div class="space-y-3 mt-3">
-                    {% for item in order.items.all %}
-                    <div class="flex gap-3">
-                        <div class="w-14 h-14 bg-slate-100 shrink-0 rounded overflow-hidden">
-                            {% if item.product.image %}<img class="w-full h-full object-cover" src="{{ item.product.image.url }}" alt="{{ item.product_name }}">{% endif %}
-                        </div>
-
-                        <div class="flex-1 text-sm">
-                            <div class="font-medium">{{ item.product_name }}</div>
-                            {% if item.variant_label %}<div class="text-slate-500">{{ item.variant_label }}</div>{% endif %}
-                            <div class="text-slate-500">Qty {{ item.quantity }}</div>
-                        </div>
-
-                        <div class="text-sm font-semibold">₹{{ item.total }}</div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-
-            <div>
-                <h2 class="font-bold text-sm text-slate-500 uppercase tracking-wide">Delivering to</h2>
-                <p class="text-sm mt-3">
-                    <strong>{{ order.full_name }}</strong><br>
-                    {{ order.address_line1 }}{% if order.address_line2 %}, {{ order.address_line2 }}{% endif %}<br>
-                    {{ order.city }}, {{ order.state }} {{ order.postal_code }}<br>
-                    {{ order.phone }}
-                </p>
-
-                <h2 class="font-bold text-sm text-slate-500 uppercase tracking-wide mt-5">Payment</h2>
-                <p class="text-sm mt-3">{{ order.get_payment_method_display }} · {{ order.get_delivery_option_display }}</p>
-            </div>
-        </div>
-
-        <div class="border-t mt-6 pt-5 space-y-2 text-sm max-w-xs ml-auto">
-            <div class="flex justify-between"><span>Subtotal</span><span>₹{{ order.subtotal }}</span></div>
-            {% if order.discount_amount %}<div class="flex justify-between text-emerald-700"><span>Discount{% if order.coupon_code %} ({{ order.coupon_code }}){% endif %}</span><span>− ₹{{ order.discount_amount }}</span></div>{% endif %}
-            <div class="flex justify-between"><span>Delivery</span><span>₹{{ order.delivery_fee }}</span></div>
-            <div class="flex justify-between"><span>Tax</span><span>₹{{ order.tax_amount }}</span></div>
-            <div class="flex justify-between font-bold text-base border-t pt-2"><span>Total</span><span>₹{{ order.total }}</span></div>
-        </div>
-
-        {% if shipment %}
-        <div class="border-t mt-6 pt-5">
-            <h2 class="font-bold text-lg">Shipment tracking</h2>
-            <p class="mt-2">{{ shipment.carrier|default:'Carrier pending' }}{% if shipment.tracking_number %} · {{ shipment.tracking_number }}{% endif %}</p>
-            {% if shipment.estimated_delivery %}<p class="text-sm text-slate-500">Estimated delivery: {{ shipment.estimated_delivery }}</p>{% endif %}
-
-            {% for event in shipment.events.all %}
-            <div class="text-sm mt-3 border-l-2 pl-3">
-                <strong>{{ event.status }}</strong>{% if event.location %} · {{ event.location }}{% endif %}<br>
-                <span class="text-slate-500">{{ event.detail }} · {{ event.occurred_at|date:'d M, H:i' }}</span>
-            </div>
-            {% endfor %}
-
-            {% if shipment.tracking_url %}<a class="text-amber-700 text-sm block mt-3" href="{{ shipment.tracking_url }}" target="_blank" rel="noopener">Open carrier tracking</a>{% endif %}
-        </div>
-        {% endif %}
-
-        {% if user.is_authenticated and order.user == user %}
-        <div class="border-t mt-6 pt-5">
-            <h2 class="font-bold">Need help with this order?</h2>
-
-            <div class="flex flex-wrap gap-3 mt-3">
-                {% if order.status == 'placed' or order.status == 'cancellation_requested' %}<a class="btn border" href="{% url 'storefront:request_order_change' order.number 'cancellation' %}">Request cancellation</a>{% endif %}
-                {% if order.status == 'delivered' or order.status == 'return_requested' %}<a class="btn border" href="{% url 'storefront:request_order_change' order.number 'return' %}">Request return</a>{% endif %}
-                <a class="btn border" href="{% url 'storefront:support' %}">Contact support</a>
-            </div>
-
-            {% for request in requests %}<p class="text-sm mt-3">{{ request.get_request_type_display }} request: <strong>{{ request.get_status_display }}</strong></p>{% endfor %}
-        </div>
-        {% endif %}
-
-        <a class="btn btn-primary mt-7" href="{% url 'storefront:product_list' %}">Continue shopping</a>
+      </section>
+      <section aria-labelledby="ship-title">
+        <h2 id="ship-title" class="ik-eyebrow mb-3">Delivering to</h2>
+        <p class="text-[15px] leading-6"><strong>{{ order.full_name }}</strong><br>
+          {{ order.address_line1 }}{% if order.address_line2 %}, {{ order.address_line2 }}{% endif %}<br>
+          {{ order.city }}, {{ order.state }} {{ order.postal_code }}<br>
+          {{ order.phone }}</p>
+        <h2 class="ik-eyebrow mt-5 mb-2">Payment</h2>
+        <p class="text-[15px]">{{ order.get_payment_method_display }} · {{ order.get_delivery_option_display }}</p>
+      </section>
     </div>
+
+    <dl class="ik-sum w-full max-w-xs ml-auto">
+      <div><dt>Subtotal</dt><dd>₹{{ order.subtotal }}</dd></div>
+      {% if order.discount_amount %}<div class="ik-sum-save"><dt>Discount{% if order.coupon_code %} ({{ order.coupon_code }}){% endif %}</dt><dd>− ₹{{ order.discount_amount }}</dd></div>{% endif %}
+      <div><dt>Delivery</dt><dd>₹{{ order.delivery_fee }}</dd></div>
+      <div><dt>Tax</dt><dd>₹{{ order.tax_amount }}</dd></div>
+      <div class="ik-sum-total"><dt>Total</dt><dd>₹{{ order.total }}</dd></div>
+    </dl>
+
+    {% if shipment %}
+    <hr class="ik-rule">
+    <section aria-labelledby="track-title" class="flex flex-col gap-3">
+      <h2 id="track-title" class="ik-h2">Shipment tracking</h2>
+      <p>{{ shipment.carrier|default:'Carrier pending' }}{% if shipment.tracking_number %} · {{ shipment.tracking_number }}{% endif %}</p>
+      {% if shipment.estimated_delivery %}<p class="text-sm ik-muted -mt-2">Estimated delivery: {{ shipment.estimated_delivery }}</p>{% endif %}
+      {% for event in shipment.events.all %}
+      <div class="ik-event"><strong>{{ event.status }}</strong>{% if event.location %} · {{ event.location }}{% endif %}<br><span class="ik-muted">{{ event.detail }} · {{ event.occurred_at|date:'d M, H:i' }}</span></div>
+      {% endfor %}
+      {% if shipment.tracking_url %}<a class="ik-link text-sm" href="{{ shipment.tracking_url }}" target="_blank" rel="noopener">Open carrier tracking</a>{% endif %}
+    </section>
+    {% endif %}
+
+    {% if user.is_authenticated and order.user == user %}
+    <hr class="ik-rule">
+    <section aria-labelledby="help-title">
+      <h2 id="help-title" class="ik-h2">Need help with this order?</h2>
+      <div class="flex flex-wrap gap-3 mt-3">
+        {% if order.status == 'placed' or order.status == 'cancellation_requested' %}<a class="ik-btn ik-btn-secondary ik-btn-sm" href="{% url 'storefront:request_order_change' order.number 'cancellation' %}">Request cancellation</a>{% endif %}
+        {% if order.status == 'delivered' or order.status == 'return_requested' %}<a class="ik-btn ik-btn-secondary ik-btn-sm" href="{% url 'storefront:request_order_change' order.number 'return' %}">Request return</a>{% endif %}
+        <a class="ik-btn ik-btn-secondary ik-btn-sm" href="{% url 'storefront:support' %}">Contact support</a>
+      </div>
+      {% for request in requests %}<p class="text-sm mt-3">{{ request.get_request_type_display }} request: <strong>{{ request.get_status_display }}</strong></p>{% endfor %}
+    </section>
+    {% endif %}
+
+    <div><a class="ik-btn ik-btn-primary" href="{% url 'storefront:product_list' %}">Continue shopping {% icon 'chevron-right' %}</a></div>
+  </article>
 </div>
 {% endblock %}

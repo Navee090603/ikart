@@ -1,1 +1,23 @@
-{% extends 'storefront/base.html' %}{% block title %}{{ page|title }} | IKart{% endblock %}{% block content %}<article class="max-w-3xl mx-auto px-4 py-10"><h1 class="text-3xl font-bold">{{ page|title }} policy</h1><div class="bg-white p-6 rounded-xl mt-6 space-y-4 text-slate-700">{% if page == 'privacy' %}<p>IKart only collects the information needed to process orders, provide support, and improve the store. We never sell personal information.</p><p>Payment details are handled by the configured payment provider and are not stored in this application.</p>{% elif page == 'returns' %}<p>Items may be returned within 7 days of delivery when unused, in their original condition, and with original packaging. Contact support with your order number to begin a return.</p><p>Refunds are issued to the original payment method after the returned item passes inspection.</p>{% else %}<p>By using IKart, you agree to provide accurate information and use the service lawfully. Product availability and pricing can change before an order is confirmed.</p><p>These starter policies should be reviewed and tailored for your business and legal jurisdiction before launch.</p>{% endif %}</div></article>{% endblock %}
+{% extends 'storefront/base.html' %}{% block title %}{{ page|title }} | IKart{% endblock %}{% block content %}
+<article class="ik-page ik-page-narrow">
+  <p class="ik-eyebrow">Trust &amp; legal</p>
+  <h1 class="ik-h1 mt-2">{{ page|title }} policy</h1>
+  <div class="ik-panel ik-prose mt-6">
+    {% if page == 'privacy' %}
+    <p>IKart only collects the information needed to process orders, provide support, and improve the store. We never sell personal information.</p>
+    <p>Payment details are handled by the configured payment provider and are not stored in this application.</p>
+    {% elif page == 'returns' %}
+    <p>Items may be returned within 7 days of delivery when unused, in their original condition, and with original packaging. Contact support with your order number to begin a return.</p>
+    <p>Refunds are issued to the original payment method after the returned item passes inspection.</p>
+    {% else %}
+    <p>By using IKart, you agree to provide accurate information and use the service lawfully. Product availability and pricing can change before an order is confirmed.</p>
+    <p>These starter policies should be reviewed and tailored for your business and legal jurisdiction before launch.</p>
+    {% endif %}
+  </div>
+  <nav class="flex flex-wrap gap-2 mt-6" aria-label="Other policies">
+    <a class="ik-chip{% if page == 'returns' %} ik-chip-on{% endif %}" href="{% url 'storefront:trust_page' 'returns' %}">Returns &amp; refunds</a>
+    <a class="ik-chip{% if page == 'privacy' %} ik-chip-on{% endif %}" href="{% url 'storefront:trust_page' 'privacy' %}">Privacy</a>
+    <a class="ik-chip{% if page == 'terms' %} ik-chip-on{% endif %}" href="{% url 'storefront:trust_page' 'terms' %}">Terms</a>
+  </nav>
+</article>
+{% endblock %}

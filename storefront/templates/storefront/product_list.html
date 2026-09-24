@@ -1,154 +1,169 @@
-{% extends 'storefront/base.html' %}
-{% block title %}Shop | IKart{% endblock %}
+{% extends 'storefront/base.html' %}{% load storefront_extras %}
+{% block title %}{% if current_category %}{{ current_category.name }}{% else %}Shop{% endif %} | IKart{% endblock %}
 
 {% block content %}
+<div class="ik-page">
 
-<div class=”max-w-7xl mx-auto px-4 py-12”>
+  <nav aria-label="Breadcrumb">
+    <ol class="ik-crumbs">
+      <li><a href="{% url 'storefront:home' %}">Home</a></li>
+      <li aria-hidden="true">{% icon 'chevron-right' 14 %}</li>
+      {% if current_category %}
+      <li><a href="{% url 'storefront:product_list' %}">Shop</a></li>
+      <li aria-hidden="true">{% icon 'chevron-right' 14 %}</li>
+      <li><span aria-current="page">{{ current_category.name }}</span></li>
+      {% else %}
+      <li><span aria-current="page">Shop all</span></li>
+      {% endif %}
+    </ol>
+  </nav>
 
-  <!-- Header -->
-  <div class=”mb-12”>
-    <h1 class=”text-4xl font-600 text-slate-900”>
-      {% if current_category %}{{ current_category.name }}{% else %}Shop all{% endif %}
+  <div class="mt-4 mb-6">
+    <h1 class="ik-h1">
+      {% if request.GET.q %}Results for “{{ request.GET.q }}”{% elif current_category %}{{ current_category.name }}{% else %}Shop all{% endif %}
     </h1>
-    <p class=”mt-2 text-slate-600”>{{ page_obj.paginator.count }} product{{ page_obj.paginator.count|pluralize }}</p>
+    <p class="ik-muted mt-1">{{ page_obj.paginator.count }} product{{ page_obj.paginator.count|pluralize }}</p>
   </div>
 
-  <style>
-    @media (min-width: 768px) {
-      .product-list-grid {
-        display: grid;
-        grid-template-columns: 280px 1fr;
-        gap: 3rem;
-      }
-    }
-  </style>
+  <div class="grid gap-6 md:gap-8 md:grid-cols-[260px_minmax(0,1fr)] items-start">
 
-  <div class=”product-list-grid”>
-    <!-- Sidebar Filters -->
-    <aside class=”md:sticky md:top-24 md:h-fit”>
-      <form class=”space-y-8”>
-        {% if request.GET.q %}<input type=”hidden” name=”q” value=”{{ request.GET.q }}”>{% endif %}
+    <aside class="md:sticky md:top-24" aria-label="Filters">
+      <details class="ik-panel md:hidden" id="filters-mobile">
+        <summary class="flex items-center justify-between font-semibold cursor-pointer list-none">
+          <span class="flex items-center gap-2">{% icon 'filter' %}Filters &amp; sort</span>
+          {% icon 'chevron-down' %}
+        </summary>
+        <div class="mt-4" data-filters-slot></div>
+      </details>
 
-        <!-- Sort -->
+      <form class="ik-panel ik-form flex flex-col gap-5 hidden md:flex" id="filters-form">
+        {% if request.GET.q %}<input type="hidden" name="q" value="{{ request.GET.q }}">{% endif %}
+
         <div>
-          <label class=”block text-sm font-600 text-slate-900 mb-3”>Sort by</label>
-          <select name=”sort” class=”form-input text-sm”>
-            <option value=”newest”>Newest</option>
-            <option value=”price_low” {% if request.GET.sort == 'price_low' %}selected{% endif %}>Price: Low to high</option>
-            <option value=”price_high” {% if request.GET.sort == 'price_high' %}selected{% endif %}>Price: High to low</option>
-            <option value=”popular” {% if request.GET.sort == 'popular' %}selected{% endif %}>Most popular</option>
-            <option value=”rating” {% if request.GET.sort == 'rating' %}selected{% endif %}>Highest rated</option>
+          <label for="f-sort">Sort by</label>
+          <select id="f-sort" name="sort">
+            <option value="newest">Newest</option>
+            <option value="price_low" {% if request.GET.sort == 'price_low' %}selected{% endif %}>Price: Low to high</option>
+            <option value="price_high" {% if request.GET.sort == 'price_high' %}selected{% endif %}>Price: High to low</option>
+            <option value="popular" {% if request.GET.sort == 'popular' %}selected{% endif %}>Most popular</option>
+            <option value="rating" {% if request.GET.sort == 'rating' %}selected{% endif %}>Highest rated</option>
           </select>
         </div>
 
-        <!-- Price Range -->
-        <div class=”pt-8 border-t border-slate-200”>
-          <label class=”block text-sm font-600 text-slate-900 mb-3”>Price</label>
-          <div class=”space-y-2”>
-            <input type=”number” name=”min_price” value=”{{ request.GET.min_price }}” placeholder=”Min” class=”form-input text-sm”>
-            <input type=”number” name=”max_price” value=”{{ request.GET.max_price }}” placeholder=”Max” class=”form-input text-sm”>
+        <hr class="ik-rule">
+        <fieldset>
+          <legend class="ik-label">Price (₹)</legend>
+          <div class="grid grid-cols-2 gap-2">
+            <input type="number" name="min_price" min="0" value="{{ request.GET.min_price }}" placeholder="Min" aria-label="Minimum price">
+            <input type="number" name="max_price" min="0" value="{{ request.GET.max_price }}" placeholder="Max" aria-label="Maximum price">
           </div>
-        </div>
+        </fieldset>
 
-        <!-- Brand -->
-        <div class=”pt-8 border-t border-slate-200”>
-          <label class=”block text-sm font-600 text-slate-900 mb-3”>Brand</label>
-          <select name=”brand” class=”form-input text-sm”>
-            <option value=””>All brands</option>
+        <hr class="ik-rule">
+        <div>
+          <label for="f-brand">Brand</label>
+          <select id="f-brand" name="brand">
+            <option value="">All brands</option>
             {% for brand in brands %}
-            <option value=”{{ brand }}” {% if request.GET.brand == brand %}selected{% endif %}>{{ brand }}</option>
+            <option value="{{ brand }}" {% if request.GET.brand == brand %}selected{% endif %}>{{ brand }}</option>
             {% endfor %}
           </select>
         </div>
 
-        <!-- Rating -->
-        <div class=”pt-8 border-t border-slate-200”>
-          <label class=”block text-sm font-600 text-slate-900 mb-3”>Rating</label>
-          <select name=”rating” class=”form-input text-sm”>
-            <option value=””>Any rating</option>
-            <option value=”4” {% if request.GET.rating == '4' %}selected{% endif %}>4★ & up</option>
-            <option value=”3” {% if request.GET.rating == '3' %}selected{% endif %}>3★ & up</option>
+        <hr class="ik-rule">
+        <div>
+          <label for="f-rating">Rating</label>
+          <select id="f-rating" name="rating">
+            <option value="">Any rating</option>
+            <option value="4" {% if request.GET.rating == '4' %}selected{% endif %}>4★ &amp; up</option>
+            <option value="3" {% if request.GET.rating == '3' %}selected{% endif %}>3★ &amp; up</option>
           </select>
         </div>
 
-        <!-- On Sale -->
-        <div class=”pt-8 border-t border-slate-200”>
-          <label class=”flex gap-3 items-center cursor-pointer”>
-            <input type=”checkbox” name=”discount” value=”1” {% if request.GET.discount %}checked{% endif %} class=”w-4 h-4”>
-            <span class=”text-sm font-600 text-slate-900”>On sale only</span>
-          </label>
-        </div>
+        <hr class="ik-rule">
+        <label class="ik-inline">
+          <input type="checkbox" name="discount" value="1" {% if request.GET.discount %}checked{% endif %}>
+          On sale only
+        </label>
 
-        <button class=”w-full btn btn-primary mt-6”>Apply filters</button>
-      </form>
+        <button class="ik-btn ik-btn-primary ik-btn-block">Apply filters</button>
+        {% if request.GET.sort or request.GET.min_price or request.GET.max_price or request.GET.brand or request.GET.rating or request.GET.discount %}
+        <a class="ik-btn ik-btn-ghost ik-btn-sm self-center" href="?{% if request.GET.q %}q={{ request.GET.q|urlencode }}{% endif %}">Clear filters</a>
+        {% endif %}
 
-      <!-- Categories -->
-      <div class=”mt-12 pt-12 border-t border-slate-200”>
-        <h3 class=”text-sm font-600 text-slate-900 mb-4”>Categories</h3>
-        <nav class=”space-y-3”>
-          {% for cat in categories %}
-          <a href=”{% url 'storefront:category' cat.slug %}” class=”block text-sm text-slate-600 hover:text-slate-900 font-500”>
-            {{ cat.name }}
-          </a>
-          {% endfor %}
+        {% if categories %}
+        <hr class="ik-rule">
+        <nav aria-label="Categories">
+          <p class="ik-label">Categories</p>
+          <div class="flex flex-col gap-1">
+            <a class="ik-link{% if not current_category %} font-bold{% endif %}" href="{% url 'storefront:product_list' %}" {% if not current_category %}aria-current="page"{% endif %}>All</a>
+            {% for cat in categories %}
+            <a class="{% if current_category and current_category.slug == cat.slug %}ik-link font-bold{% else %}ik-muted hover:text-brand{% endif %} no-underline py-0.5" href="{% url 'storefront:category' cat.slug %}" {% if current_category and current_category.slug == cat.slug %}aria-current="page"{% endif %}>{{ cat.name }}</a>
+            {% endfor %}
+          </div>
         </nav>
-      </div>
+        {% endif %}
+      </form>
     </aside>
 
-    <!-- Products Section -->
-    <section>
-      <!-- Typo Suggestions -->
+    <section aria-label="Products">
       {% if typo_suggestions %}
-      <div class=”bg-blue-50 border border-blue-200 rounded-lg p-4 mb-8”>
-        <p class=”text-sm text-blue-900”>
-          <strong>Did you mean?</strong> {{ typo_suggestions|join:', ' }}
-        </p>
+      <div class="ik-alert mb-6">
+        {% icon 'search' %}
+        <p><span class="ik-alert-title">Did you mean?</span> {% for word in typo_suggestions %}<a href="?q={{ word|urlencode }}">{{ word }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
       </div>
       {% endif %}
 
-      <!-- Products Grid -->
-      <div class=”grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8”>
+      <div class="ik-grid">
         {% for product in products %}
           {% include 'storefront/_product_card.html' %}
         {% empty %}
-        <div class=”col-span-full”>
-          <div class=”bg-slate-50 rounded-lg p-16 text-center”>
-            <p class=”text-slate-900 font-600”>No products found</p>
-            <p class=”text-slate-600 text-sm mt-1”>Try adjusting your filters</p>
-          </div>
+        <div class="ik-empty col-span-full">
+          <span class="ik-empty-icon">{% icon 'search' 28 %}</span>
+          <p class="ik-empty-title">No products found</p>
+          <p class="ik-empty-text">Try adjusting your filters</p>
         </div>
         {% endfor %}
       </div>
 
-      <!-- Pagination -->
       {% if page_obj.paginator.num_pages > 1 %}
-      <nav class=”flex justify-center items-center gap-2 mt-16 pt-8 border-t border-slate-200” aria-label=”Product pages”>
+      <nav class="ik-pages mt-10" aria-label="Product pages">
         {% if page_obj.has_previous %}
-        <a class=”btn” style=”background:transparent;border:1px solid #e5e7eb;color:#1f2937” href=”?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&amp;{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}”>
-          ← Previous
-        </a>
+        <a class="ik-btn ik-btn-secondary ik-btn-sm" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&amp;{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}">{% icon 'chevron-left' 18 %}Previous</a>
+        {% else %}
+        <span class="ik-btn ik-btn-secondary ik-btn-sm" aria-disabled="true">{% icon 'chevron-left' 18 %}Previous</span>
         {% endif %}
-
-        <div class=”flex items-center gap-1”>
+        <ol>
           {% for num in page_obj.paginator.page_range %}
             {% if page_obj.number == num %}
-            <span class=”px-3 py-2 font-700 text-amber-700”>{{ num }}</span>
+            <li><span class="ik-pagenum ik-pagenum-on" aria-current="page">{{ num }}</span></li>
             {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
-            <a class=”px-3 py-2 text-slate-600 hover:text-slate-900 font-500” href=”?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&amp;{% endif %}{% endfor %}page={{ num }}”>{{ num }}</a>
+            <li><a class="ik-pagenum" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&amp;{% endif %}{% endfor %}page={{ num }}">{{ num }}</a></li>
             {% endif %}
           {% endfor %}
-        </div>
-
+        </ol>
         {% if page_obj.has_next %}
-        <a class=”btn” style=”background:transparent;border:1px solid #e5e7eb;color:#1f2937” href=”?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&amp;{% endif %}{% endfor %}page={{ page_obj.next_page_number }}”>
-          Next →
-        </a>
+        <a class="ik-btn ik-btn-secondary ik-btn-sm" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&amp;{% endif %}{% endfor %}page={{ page_obj.next_page_number }}">Next{% icon 'chevron-right' 18 %}</a>
+        {% else %}
+        <span class="ik-btn ik-btn-secondary ik-btn-sm" aria-disabled="true">Next{% icon 'chevron-right' 18 %}</span>
         {% endif %}
       </nav>
       {% endif %}
     </section>
   </div>
-
 </div>
-
+<script>
+  // One filter form serves both layouts: on phones it moves inside the collapsible panel.
+  (() => {
+    const form = document.getElementById('filters-form');
+    const slot = document.querySelector('[data-filters-slot]');
+    const mq = window.matchMedia('(min-width: 768px)');
+    const home = form.parentElement;
+    const place = () => {
+      if (mq.matches) { home.appendChild(form); form.classList.remove('!flex', 'border-0', 'p-0'); }
+      else { slot.appendChild(form); form.classList.add('!flex', 'border-0', 'p-0'); }
+    };
+    place(); mq.addEventListener('change', place);
+  })();
+</script>
 {% endblock %}
