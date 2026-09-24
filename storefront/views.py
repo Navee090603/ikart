@@ -22,6 +22,7 @@ from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
@@ -30,7 +31,7 @@ from .forms import AddressForm, ChangePendingEmailForm, CheckoutForm, MarketingP
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductQuestion, ProductVariant, ProductView, Review, SavedForLaterItem, Shipment, SupportTicket, UserProfile, WishlistItem
 from .payments.razorpay_links import PaymentLinkError, cancel_payment_link, create_payment_link, verify_payment_link_signature
 from .ratelimit import rate_limit
-from .services import calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, restore_order_inventory
+from .services import build_order_tracking_steps, calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, restore_order_inventory, verified_purchaser_ids
 from django.contrib.auth import views as auth_views
 
 logger = logging.getLogger(__name__)
@@ -148,8 +149,17 @@ def product_detail(request, slug):
         request.session.create()
     ProductView.objects.create(product=product, user=request.user if request.user.is_authenticated else None, session_key=request.session.session_key)
     is_wishlisted = request.user.is_authenticated and WishlistItem.objects.filter(user=request.user, product=product).exists()
+    purchased_user_ids = verified_purchaser_ids(product)
+    # Verified-purchase reviews first, newest first within each group.
+    reviews = sorted(
+        (review for review in product.reviews.all() if review.is_approved),
+        key=lambda review: (review.user_id not in purchased_user_ids, -review.created_at.timestamp()),
+    )
+    questions = [question for question in product.questions.all() if question.is_published]
     return render(request, "storefront/product_detail.html", {
-        "product": product, "review_form": ReviewForm(), "question_form": ProductQuestionForm(),
+        "product": product, "question_form": ProductQuestionForm(),
+        "reviews": reviews, "questions": questions,
+        "purchased_user_ids": purchased_user_ids, "has_purchased": request.user.id in purchased_user_ids,
         "is_wishlisted": is_wishlisted, "frequently_bought": frequently_bought_together(product),
         "also_viewed": customers_also_viewed(product),
     })
@@ -438,6 +448,17 @@ def _create_order_from_cart(form, cart, quote, checkout_token, payment_pending=F
         if coupon:
             CouponRedemption.objects.create(coupon=coupon, order=order, user=order.user, discount_amount=quote.discount_amount)
         return order
+
+
+@require_GET
+@rate_limit("check_email_registered", limit=20, period_seconds=300)
+def check_email_registered(request):
+    """Lets checkout warn a guest who types an email that already has an
+    account: otherwise their order is created with user=None and never
+    shows up in that account's order history."""
+    email = request.GET.get("email", "").strip().lower()
+    registered = bool(email) and User.objects.filter(email__iexact=email).exists()
+    return JsonResponse({"registered": registered})
 
 
 @rate_limit("checkout", limit=30, period_seconds=300)
@@ -874,15 +895,36 @@ def razorpay_webhook(request):
 
 
 def order_confirmation(request, number):
-    order = get_object_or_404(Order, number=number)
+    order = get_object_or_404(Order.objects.prefetch_related("items__product"), number=number)
     if not _can_access_order(request, order):
         raise Http404
-    return render(request, "storefront/order_confirmation.html", {"order": order, "shipment": getattr(order, "shipment", None), "requests": order.requests.all()})
+    return render(request, "storefront/order_confirmation.html", {
+        "order": order,
+        "shipment": getattr(order, "shipment", None),
+        "requests": order.requests.all(),
+        "tracking_steps": build_order_tracking_steps(order),
+    })
 
 
 @login_required
 def order_history(request):
-    return render(request, "storefront/order_history.html", {"orders": request.user.orders.prefetch_related("items", "requests")})
+    orders = list(request.user.orders.select_related("shipment").prefetch_related("items__product", "requests"))
+    reviewable_product_ids = {
+        item.product_id
+        for order in orders if order.status == Order.Status.DELIVERED
+        for item in order.items.all() if item.product_id
+    }
+    existing_reviews = {
+        review.product_id: review
+        for review in Review.objects.filter(user=request.user, product_id__in=reviewable_product_ids)
+    }
+    review_forms = {
+        product_id: ReviewForm(instance=existing_reviews.get(product_id), auto_id=f"id_review_{product_id}_%s")
+        for product_id in reviewable_product_ids
+    }
+    return render(request, "storefront/order_history.html", {
+        "orders": orders, "existing_reviews": existing_reviews, "review_forms": review_forms,
+    })
 
 
 @login_required
@@ -1051,6 +1093,9 @@ def add_review(request, slug):
         messages.success(request, "Thanks for reviewing this product.")
     else:
         messages.error(request, "Please provide a rating from 1 to 5 and complete the review fields.")
+    next_url = request.POST.get("next", "")
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        return redirect(next_url)
     return redirect(product.get_absolute_url())
 
 
@@ -1118,7 +1163,7 @@ def notification_preferences(request):
 
 @staff_member_required
 def analytics_dashboard(request):
-    completed_orders = Order.objects.filter(status__in=[Order.Status.PLACED, Order.Status.SHIPPED, Order.Status.DELIVERED])
+    completed_orders = Order.objects.filter(status__in=[Order.Status.PLACED, Order.Status.SHIPPED, Order.Status.OUT_FOR_DELIVERY, Order.Status.DELIVERED])
     totals = completed_orders.aggregate(revenue=Sum("total"), orders=Count("id"))
     top_products = (
         OrderItem.objects.filter(order__in=completed_orders)

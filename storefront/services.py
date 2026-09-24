@@ -31,6 +31,28 @@ class CartQuote:
         }
 
 
+ORDER_TRACKING_STEPS = [
+    (Order.Status.PLACED, "Order placed"),
+    (Order.Status.SHIPPED, "Shipped"),
+    (Order.Status.OUT_FOR_DELIVERY, "Out for delivery"),
+    (Order.Status.DELIVERED, "Delivered"),
+]
+
+
+def build_order_tracking_steps(order):
+    """The Placed -> Delivered progress steps for an order, or None if the
+    order isn't on that happy path (payment pending/failed, cancelled,
+    return, refunded) and needs a status message instead of a stepper."""
+    statuses = [status for status, _ in ORDER_TRACKING_STEPS]
+    if order.status not in statuses:
+        return None
+    current_index = statuses.index(order.status)
+    return [
+        {"label": label, "done": index <= current_index, "current": index == current_index}
+        for index, (status, label) in enumerate(ORDER_TRACKING_STEPS)
+    ]
+
+
 def calculate_cart_quote(cart, user=None, delivery_option=Order.DeliveryOption.STANDARD, coupon_code=""):
     """The only source of truth for cart, checkout, and payment amounts."""
     subtotal = cart.subtotal
@@ -246,6 +268,24 @@ def frequently_bought_together(product, limit=4):
         return Product.objects.none()
     ordering = Case(*[When(id=product_id, then=position) for position, product_id in enumerate(ids)], output_field=IntegerField())
     return Product.objects.filter(id__in=ids, is_active=True).order_by(ordering)
+
+
+# Orders in these states never resulted in the buyer actually keeping the
+# item (payment never went through, or the order was cancelled outright),
+# so they shouldn't count toward a "Verified Purchase" badge. Everything
+# else - including a completed return/refund - still means the badge holder
+# genuinely bought and received the product at some point.
+PURCHASE_VOIDING_STATUSES = {Order.Status.PAYMENT_PENDING, Order.Status.PAYMENT_FAILED, Order.Status.CANCELLED}
+
+
+def verified_purchaser_ids(product):
+    """User IDs eligible for a "Verified Purchase" badge on their review of
+    this product: they have a real (non-voided) order containing it."""
+    return set(
+        OrderItem.objects.filter(product=product, order__user__isnull=False)
+        .exclude(order__status__in=PURCHASE_VOIDING_STATUSES)
+        .values_list("order__user_id", flat=True)
+    )
 
 
 def customers_also_viewed(product, limit=4):

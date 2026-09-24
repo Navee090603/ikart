@@ -244,19 +244,32 @@
       Questions & answers
     </h2>
 
+    {% if user.is_authenticated %}
+    <form method="post" action="{% url 'storefront:add_product_question' product.slug %}" class="bg-white rounded-xl p-5 mt-4">
+      {% csrf_token %}
 
-    {% for question in product.questions.all %}
+      <label class="block font-medium mb-1" for="{{ question_form.question.id_for_label }}">Ask a question</label>
+      {{ question_form.question }}
 
-    {% if question.is_published %}
+      {% for error in question_form.question.errors %}
+      <p class="text-red-600 text-sm mt-1">{{ error }}</p>
+      {% endfor %}
 
+      <button class="btn btn-dark mt-3">Submit question</button>
+    </form>
+    {% else %}
+    <p class="bg-white rounded-xl p-5 mt-4 text-sm">
+      <a class="text-amber-700 hover:underline" href="{% url 'login' %}?next={{ request.path }}">Sign in</a> to ask a question about this product.
+    </p>
+    {% endif %}
+
+    {% for question in questions %}
 
     <div class="bg-white rounded-xl p-5 mt-4">
-
 
       <p class="font-semibold">
         Q. {{ question.question }}
       </p>
-
 
       {% if question.answer %}
 
@@ -272,19 +285,13 @@
 
       {% endif %}
 
-
     </div>
-
-
-    {% endif %}
-
 
     {% empty %}
 
     <p class="text-slate-500 mt-3">
       Be the first to ask a question.
     </p>
-
 
     {% endfor %}
 
@@ -305,16 +312,18 @@
       Customer reviews
     </h2>
 
+    {% if has_purchased %}
+    <p class="bg-white rounded-xl p-5 mt-4 text-sm">
+      <span class="text-emerald-700 font-medium">✓ Verified Purchase</span> —
+      <a class="text-amber-700 hover:underline" href="{% url 'storefront:order_history' %}">Rate this product from your orders</a>.
+    </p>
+    {% endif %}
 
 
-    {% for review in product.reviews.all %}
 
-
-    {% if review.is_approved %}
-
+    {% for review in reviews %}
 
     <div class="bg-white rounded-xl p-5 mt-4">
-
 
       <div class="star">
 
@@ -322,36 +331,27 @@
 
         {% if forloop.counter <= review.rating %} ★ {% else %} ☆ {% endif %} {% endfor %} </div>
 
-
           <h3 class="font-semibold">
             {{ review.title }}
           </h3>
-
 
           <p class="text-slate-600">
             {{ review.body }}
           </p>
 
-
           <p class="text-xs text-slate-400">
             {{ review.user.username }}
+            {% if review.user_id in purchased_user_ids %}<span class="text-emerald-700 font-medium">✓ Verified Purchase</span>{% endif %}
             · {{ review.created_at|date:'d M Y' }}
           </p>
 
-
       </div>
 
-
-      {% endif %}
-
-
       {% empty %}
-
 
       <p class="text-slate-500 mt-3">
         Be the first to review this product.
       </p>
-
 
       {% endfor %}
 

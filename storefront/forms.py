@@ -20,6 +20,11 @@ PASSWORD_WIDGET_ATTRS = {"class": "pr-12"}
 # password) as it gets from the server on submit.
 NEW_PASSWORD_VALIDATE_RULE = "required minlength notnumeric notalpha special notcommon similarity"
 
+# base.html's global `input{width:100%;padding:...}` rule is meant for text
+# inputs; radios need the same "w-auto" override product_list.html already
+# uses for its checkbox, or they render as oversized boxes.
+RADIO_WIDGET_ATTRS = {"class": "w-auto accent-amber-500"}
+
 
 def _validate_email_not_registered(email):
     email = email.strip().lower()
@@ -127,7 +132,18 @@ class ChangePendingEmailForm(forms.Form):
 
 
 class CheckoutForm(forms.ModelForm):
-    saved_address = forms.ModelChoiceField(queryset=Address.objects.none(), required=False, empty_label="Enter a new delivery address")
+    saved_address = forms.ModelChoiceField(
+        queryset=Address.objects.none(), required=False, empty_label="Enter a new delivery address",
+        widget=forms.RadioSelect(attrs={**RADIO_WIDGET_ATTRS}),
+    )
+    # payment_method is declared explicitly (rather than left to the
+    # ModelForm machinery) so it doesn't get an unwanted blank "---------"
+    # choice: it has no model-level default, so Django's default ModelForm
+    # field generation includes a blank option for it (delivery_option has a
+    # default, so it's unaffected and doesn't need this).
+    payment_method = forms.ChoiceField(
+        choices=Order.PaymentMethod.choices, widget=forms.RadioSelect(attrs={**RADIO_WIDGET_ATTRS})
+    )
     coupon_code = forms.CharField(max_length=40, required=False, label="Coupon code")
     checkout_token = forms.UUIDField(widget=forms.HiddenInput)
 
@@ -138,8 +154,7 @@ class CheckoutForm(forms.ModelForm):
             "city", "state", "postal_code", "delivery_option", "payment_method",
         ]
         widgets = {
-            "delivery_option": forms.RadioSelect,
-            "payment_method": forms.RadioSelect,
+            "delivery_option": forms.RadioSelect(attrs={**RADIO_WIDGET_ATTRS}),
         }
 
     def __init__(self, *args, user=None, **kwargs):
@@ -148,6 +163,9 @@ class CheckoutForm(forms.ModelForm):
         self.shipping_fields = ("full_name", "phone", "address_line1", "city", "state", "postal_code")
         for field in self.shipping_fields:
             self.fields[field].required = False
+        self.fields["email"].widget.attrs.update({"data-validate": "required email"})
+        for field in ("full_name", "phone", "address_line1", "city", "state", "postal_code"):
+            self.fields[field].widget.attrs.update({"data-validate": "required"})
         if user and user.is_authenticated:
             addresses = user.addresses.order_by("-is_default", "-id")
             self.fields["saved_address"].queryset = addresses

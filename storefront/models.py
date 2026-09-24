@@ -127,11 +127,27 @@ class Order(models.Model):
         PAYMENT_FAILED = "payment_failed", "Payment failed"
         PLACED = "placed", "Placed"
         SHIPPED = "shipped", "Shipped"
+        OUT_FOR_DELIVERY = "out_for_delivery", "Out for delivery"
         DELIVERED = "delivered", "Delivered"
         CANCELLED = "cancelled", "Cancelled"
         CANCELLATION_REQUESTED = "cancellation_requested", "Cancellation requested"
         RETURN_REQUESTED = "return_requested", "Return requested"
         REFUNDED = "refunded", "Refunded"
+
+    # Badge color for each status, shared by the order list and order detail
+    # pages so a status always reads the same way everywhere it appears.
+    STATUS_BADGE_CLASSES = {
+        Status.PAYMENT_PENDING: "bg-amber-100 text-amber-800",
+        Status.PAYMENT_FAILED: "bg-red-100 text-red-700",
+        Status.PLACED: "bg-slate-100 text-slate-700",
+        Status.SHIPPED: "bg-blue-100 text-blue-700",
+        Status.OUT_FOR_DELIVERY: "bg-indigo-100 text-indigo-700",
+        Status.DELIVERED: "bg-emerald-100 text-emerald-700",
+        Status.CANCELLED: "bg-red-100 text-red-700",
+        Status.CANCELLATION_REQUESTED: "bg-amber-100 text-amber-800",
+        Status.RETURN_REQUESTED: "bg-amber-100 text-amber-800",
+        Status.REFUNDED: "bg-slate-100 text-slate-700",
+    }
 
     class PaymentMethod(models.TextChoices):
         COD = "cod", "Cash on delivery"
@@ -178,6 +194,10 @@ class Order(models.Model):
 
     def __str__(self):
         return self.number
+
+    @property
+    def status_badge_class(self):
+        return self.STATUS_BADGE_CLASSES.get(self.status, "bg-slate-100 text-slate-700")
 
 
 class OrderItem(models.Model):
