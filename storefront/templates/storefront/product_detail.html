@@ -6,372 +6,255 @@
 
 <div class="max-w-7xl mx-auto px-4 py-8">
 
-  <div class="grid md:grid-cols-2 gap-10">
+  <!-- Main Product Section -->
+  <div class="grid md:grid-cols-3 gap-12 mb-16">
 
-    <!-- Images -->
-    <section class="bg-white rounded-xl p-4">
+    <!-- Images: Left Column, 2 Units -->
+    <div class="md:col-span-2">
+      <section class="bg-white rounded-lg overflow-hidden border border-slate-200">
+        {% if product.images.exists %}
+        <img id="mainProductImage" src="{{ product.images.first.image.url }}" class="w-full max-h-[600px] object-contain bg-slate-50"
+          alt="{{ product.name }}">
+        <div class="flex gap-2 mt-4 px-4 pb-4 overflow-x-auto">
+          {% for image in product.images.all %}
+          <img src="{{ image.image.url }}" onclick="changeProductImage('{{ image.image.url }}')"
+            class="w-20 h-20 object-cover rounded cursor-pointer border border-slate-200 hover:border-amber-400 transition-colors" alt="{{ product.name }}">
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="h-96 grid place-items-center bg-slate-100 text-slate-400 font-medium">
+          No image available
+        </div>
+        {% endif %}
+      </section>
+    </div>
 
-      {% if product.images.exists %}
+    <!-- Details: Right Column, 1 Unit - Sticky on Desktop -->
+    <section class="md:sticky md:top-24 md:max-h-[600px] md:overflow-y-auto">
 
-      <img id="mainProductImage" src="{{ product.images.first.image.url }}" class="w-full max-h-[520px] object-contain"
-        alt="{{ product.name }}">
-
-
-      <div class="flex gap-3 mt-4 overflow-x-auto">
-
-        {% for image in product.images.all %}
-
-        <img src="{{ image.image.url }}" onclick="changeProductImage('{{ image.image.url }}')"
-          class="w-20 h-20 object-cover rounded border cursor-pointer" alt="{{ product.name }}">
-
-        {% endfor %}
-
-      </div>
-
-
-      {% else %}
-
-      <div class="h-80 grid place-items-center bg-slate-100 text-slate-400">
-        No image available
-      </div>
-
-      {% endif %}
-
-    </section>
-
-
-
-    <!-- Details -->
-
-    <section>
-
-      <p class="text-sm text-slate-500">
+      <!-- Breadcrumb & Category -->
+      <p class="text-xs font-semibold text-amber-700 tracking-wider uppercase">
         {{ product.category }}
         {% if product.brand %} · {{ product.brand }}{% endif %}
       </p>
 
-
-      <h1 class="text-3xl font-bold mt-2">
+      <!-- Title & Rating -->
+      <h1 class="text-3xl md:text-4xl font-bold leading-tight mt-4 text-slate-900">
         {{ product.name }}
       </h1>
 
-
-      <p class="mt-2">
-        <span class="star">★★★★★</span>
-        {{ product.average_rating }}
-        · {{ product.reviews.count }} review{{ product.reviews.count|pluralize }}
-      </p>
-
-
-
-      <div class="text-3xl font-black mt-5">
-
-        ₹{{ product.price }}
-
-        {% if product.compare_at_price %}
-
-        <span class="text-lg text-slate-400 line-through">
-          ₹{{ product.compare_at_price }}
-        </span>
-
-        <span class="text-base text-emerald-700">
-          {{ product.discount_percentage }}% off
-        </span>
-
-        {% endif %}
-
+      <div class="flex items-center gap-3 mt-5">
+        <div class="flex items-center gap-1">
+          {% for i in '12345' %}
+            {% if forloop.counter <= product.average_rating|floatformat:0 %}
+            <span class="star text-lg">★</span>
+            {% else %}
+            <span class="text-slate-300 text-lg">★</span>
+            {% endif %}
+          {% endfor %}
+        </div>
+        <span class="font-semibold text-slate-900">{{ product.average_rating }}</span>
+        <span class="text-sm text-slate-500">({{ product.reviews.count }} review{{ product.reviews.count|pluralize }})</span>
       </div>
 
+      <!-- Price Section: Prominent -->
+      <div class="mt-6 pb-4 border-b border-slate-200">
+        <div class="flex items-baseline gap-3">
+          <div class="price-highlight">₹{{ product.price }}</div>
+          {% if product.compare_at_price %}
+          <span class="text-lg text-slate-400 line-through">₹{{ product.compare_at_price }}</span>
+          <span class="badge badge-sale">{{ product.discount_percentage }}% off</span>
+          {% endif %}
+        </div>
+      </div>
 
-
-      <p class="mt-4 text-slate-600">
+      <!-- Short Description -->
+      <p class="mt-4 text-slate-600 leading-relaxed">
         {{ product.short_description }}
       </p>
 
+      <!-- Stock Status -->
+      <div class="mt-4">
+        {% if product.stock %}
+        <div class="trust-signal">
+          <span>✓</span>
+          <span>In stock · {{ product.stock }} available</span>
+        </div>
+        {% else %}
+        <p class="text-red-600 font-medium">Out of stock</p>
+        {% endif %}
+      </div>
 
-
-
+      <!-- Add to Wishlist -->
       {% if user.is_authenticated %}
-
       <form method="post" action="{% url 'storefront:toggle_wishlist' product.id %}" class="mt-4">
-
         {% csrf_token %}
-
         <input type="hidden" name="next" value="{{ request.path }}">
-
-        <button class="text-amber-700 font-semibold">
-
+        <button class="text-amber-700 font-semibold hover:text-amber-800 text-sm">
           {% if is_wishlisted %}
           ♥ Remove from wishlist
           {% else %}
           ♡ Add to wishlist
           {% endif %}
-
         </button>
-
       </form>
-
       {% endif %}
 
-
-
-
-      <form method="post" action="{% url 'storefront:add_to_cart' product.id %}" class="mt-5 space-y-4">
-
+      <!-- Add to Cart Form -->
+      <form method="post" action="{% url 'storefront:add_to_cart' product.id %}" class="mt-6 space-y-4">
         {% csrf_token %}
 
-
+        <!-- Variant Selection -->
         {% if product.variants.exists %}
-
-        <label class="block font-semibold">
-
-          Choose an option
-
-          <select name="variant" class="border p-2 rounded" required>
-
-
+        <div>
+          <label class="block font-semibold text-slate-900 mb-2">
+            Choose an option
+          </label>
+          <select name="variant" class="form-input" required>
             {% for variant in product.variants.all %}
-
             <option value="{{ variant.id }}" {% if not variant.stock %}disabled{% endif %}>
-
               {{ variant.label }}
-
-              {% if variant.price_adjustment %}
-              (₹{{ variant.price_adjustment|floatformat:2 }} extra)
-              {% endif %}
-
+              {% if variant.price_adjustment %}(₹{{ variant.price_adjustment|floatformat:2 }}){% endif %}
               - {{ variant.stock }} left
-
             </option>
-
-
             {% endfor %}
-
-
           </select>
-
-        </label>
-
+        </div>
         {% endif %}
 
+        <!-- Quantity Selection -->
+        <div>
+          <label class="block font-semibold text-slate-900 mb-2">
+            Quantity
+          </label>
+          <div class="flex items-center gap-2">
+            <input name="quantity" type="number" min="1" value="1" class="form-input w-20">
+          </div>
+        </div>
 
-
-
-        <label class="block font-semibold">
-
-          Quantity
-
-          <input name="quantity" type="number" min="1" value="1" class="border p-2 rounded w-24">
-
-        </label>
-
-
-
-
-        <p>
-
-          {% if product.stock %}
-
-          <span class="text-emerald-700">
-            In stock
-          </span>
-
-          {% else %}
-
-          <span class="text-red-700">
-            Out of stock
-          </span>
-
-          {% endif %}
-
-        </p>
-
-
-
-        <button class="btn btn-primary">
-
+        <!-- Primary CTA -->
+        <button class="btn btn-primary w-full py-3 text-lg font-bold" {% if not product.stock %}disabled{% endif %}>
           Add to cart
-
         </button>
-
-
       </form>
 
-
-
-
-
-      <details class="mt-7 border-t pt-4">
-
-        <summary class="font-semibold cursor-pointer">
-
-          Product details & specifications
-
-        </summary>
-
-
-        <p class="whitespace-pre-line text-slate-600 mt-3">
-
-          {{ product.description }}
-
-
-          {% if product.specifications %}
-
-          {{ product.specifications }}
-
-          {% endif %}
-
-        </p>
-
-
-      </details>
-
-
-
+      <!-- Trust Signals -->
+      <div class="mt-6 pt-6 border-t border-slate-200 space-y-2 text-sm">
+        <div class="flex items-center gap-2 text-slate-600">
+          <span class="text-amber-700 font-bold">✓</span>
+          <span>Secure checkout</span>
+        </div>
+        <div class="flex items-center gap-2 text-slate-600">
+          <span class="text-amber-700 font-bold">✓</span>
+          <span>30-day returns</span>
+        </div>
+      </div>
     </section>
 
   </div>
 
+  <!-- Product Details Accordion -->
+  <div class="border-t border-slate-200 pt-8">
+    <details class="cursor-pointer">
+      <summary class="text-lg font-bold text-slate-900 hover:text-amber-700 transition-colors">
+        Product details & specifications
+      </summary>
+      <div class="mt-4 text-slate-600 leading-relaxed">
+        <p class="whitespace-pre-line">
+          {{ product.description }}
+          {% if product.specifications %}
+          {{ product.specifications }}
+          {% endif %}
+        </p>
+      </div>
+    </details>
+  </div>
 
-
-
-
-  <!-- Questions -->
-
-  <section class="mt-12 max-w-3xl">
-
-    <h2 class="text-2xl font-bold">
-      Questions & answers
-    </h2>
+  <!-- Questions Section -->
+  <section class="mt-12 border-t border-slate-200 pt-8">
+    <h2 class="text-2xl font-bold text-slate-900 mb-6">Questions & answers</h2>
 
     {% if user.is_authenticated %}
-    <form method="post" action="{% url 'storefront:add_product_question' product.slug %}" class="bg-white rounded-xl p-5 mt-4">
+    <form method="post" action="{% url 'storefront:add_product_question' product.slug %}" class="bg-white rounded-lg p-6 border border-slate-200 mb-6">
       {% csrf_token %}
-
-      <label class="block font-medium mb-1" for="{{ question_form.question.id_for_label }}">Ask a question</label>
+      <label class="block font-semibold text-slate-900 mb-3" for="{{ question_form.question.id_for_label }}">Ask a question</label>
       {{ question_form.question }}
-
       {% for error in question_form.question.errors %}
       <p class="text-red-600 text-sm mt-1">{{ error }}</p>
       {% endfor %}
-
-      <button class="btn btn-dark mt-3">Submit question</button>
+      <button class="btn btn-dark mt-4">Submit question</button>
     </form>
     {% else %}
-    <p class="bg-white rounded-xl p-5 mt-4 text-sm">
-      <a class="text-amber-700 hover:underline" href="{% url 'login' %}?next={{ request.path }}">Sign in</a> to ask a question about this product.
+    <p class="bg-white rounded-lg p-6 border border-slate-200 text-sm mb-6">
+      <a class="text-amber-700 hover:underline font-semibold" href="{% url 'login' %}?next={{ request.path }}">Sign in</a> to ask a question about this product.
     </p>
     {% endif %}
 
-    {% for question in questions %}
-
-    <div class="bg-white rounded-xl p-5 mt-4">
-
-      <p class="font-semibold">
-        Q. {{ question.question }}
-      </p>
-
-      {% if question.answer %}
-
-      <p class="text-slate-600 mt-2">
-        A. {{ question.answer }}
-      </p>
-
-      {% else %}
-
-      <p class="text-sm text-slate-400">
-        Awaiting answer
-      </p>
-
-      {% endif %}
-
+    <div class="space-y-4">
+      {% for question in questions %}
+      <div class="bg-white rounded-lg p-6 border border-slate-200">
+        <p class="font-semibold text-slate-900">Q. {{ question.question }}</p>
+        {% if question.answer %}
+        <p class="text-slate-600 mt-2">A. {{ question.answer }}</p>
+        {% else %}
+        <p class="text-sm text-slate-400 mt-2">Awaiting answer</p>
+        {% endif %}
+      </div>
+      {% empty %}
+      <p class="text-slate-500 text-center py-4">Be the first to ask a question.</p>
+      {% endfor %}
     </div>
-
-    {% empty %}
-
-    <p class="text-slate-500 mt-3">
-      Be the first to ask a question.
-    </p>
-
-    {% endfor %}
-
-
   </section>
 
-
-
-
-
-  <!-- Reviews -->
-
-
-  <section class="mt-12 max-w-3xl">
-
-
-    <h2 class="text-2xl font-bold">
-      Customer reviews
-    </h2>
+  <!-- Reviews Section -->
+  <section class="mt-12 border-t border-slate-200 pt-8">
+    <h2 class="text-2xl font-bold text-slate-900 mb-6">Customer reviews</h2>
 
     {% if has_purchased %}
-    <p class="bg-white rounded-xl p-5 mt-4 text-sm">
-      <span class="text-emerald-700 font-medium">✓ Verified Purchase</span> —
-      <a class="text-amber-700 hover:underline" href="{% url 'storefront:order_history' %}">Rate this product from your orders</a>.
-    </p>
+    <div class="bg-emerald-50 rounded-lg p-6 border border-emerald-200 mb-6">
+      <p class="text-sm">
+        <span class="trust-signal">
+          <span>✓</span>
+          <span>Verified Purchase</span>
+        </span>
+        —
+        <a class="text-amber-700 hover:underline font-semibold" href="{% url 'storefront:order_history' %}">Rate this product from your orders</a>.
+      </p>
+    </div>
     {% endif %}
 
-
-
-    {% for review in reviews %}
-
-    <div class="bg-white rounded-xl p-5 mt-4">
-
-      <div class="star">
-
-        {% for i in '12345' %}
-
-        {% if forloop.counter <= review.rating %} ★ {% else %} ☆ {% endif %} {% endfor %} </div>
-
-          <h3 class="font-semibold">
-            {{ review.title }}
-          </h3>
-
-          <p class="text-slate-600">
-            {{ review.body }}
-          </p>
-
-          <p class="text-xs text-slate-400">
-            {{ review.user.username }}
-            {% if review.user_id in purchased_user_ids %}<span class="text-emerald-700 font-medium">✓ Verified Purchase</span>{% endif %}
-            · {{ review.created_at|date:'d M Y' }}
-          </p>
-
+    <div class="space-y-4">
+      {% for review in reviews %}
+      <div class="bg-white rounded-lg p-6 border border-slate-200">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-1">
+            {% for i in '12345' %}
+            {% if forloop.counter <= review.rating %}<span class="star text-lg">★</span>{% else %}<span class="text-slate-300 text-lg">★</span>{% endif %}
+            {% endfor %}
+          </div>
+          {% if review.user_id in purchased_user_ids %}
+          <span class="trust-signal">
+            <span>✓</span>
+            <span>Verified Purchase</span>
+          </span>
+          {% endif %}
+        </div>
+        <h3 class="font-semibold text-slate-900 mt-3">{{ review.title }}</h3>
+        <p class="text-slate-600 mt-2">{{ review.body }}</p>
+        <p class="text-xs text-slate-500 mt-3">{{ review.user.username }} · {{ review.created_at|date:'d M Y' }}</p>
       </div>
-
       {% empty %}
-
-      <p class="text-slate-500 mt-3">
-        Be the first to review this product.
-      </p>
-
+      <p class="text-slate-500 text-center py-8">Be the first to review this product.</p>
       {% endfor %}
-
-
+    </div>
   </section>
-
 
 </div>
 
-
-
 <script>
-
   function changeProductImage(url) {
-
     document.getElementById("mainProductImage").src = url;
-
   }
-
 </script>
-
 
 {% endblock %}
