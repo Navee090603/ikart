@@ -13,8 +13,17 @@
     <p class=”mt-2 text-slate-600”>{{ page_obj.paginator.count }} product{{ page_obj.paginator.count|pluralize }}</p>
   </div>
 
-  <div class=”grid md:grid-cols-[280px_1fr] gap-12”>
+  <style>
+    @media (min-width: 768px) {
+      .product-list-grid {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        gap: 3rem;
+      }
+    }
+  </style>
 
+  <div class=”product-list-grid”>
     <!-- Sidebar Filters -->
     <aside class=”md:sticky md:top-24 md:h-fit”>
       <form class=”space-y-8”>
@@ -138,7 +147,6 @@
       </nav>
       {% endif %}
     </section>
-
   </div>
 
 </div>
