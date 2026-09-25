@@ -32,6 +32,7 @@ from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingP
 from .payments.razorpay_links import PaymentLinkError, cancel_payment_link, create_payment_link, verify_payment_link_signature
 from .ratelimit import rate_limit
 from .services import build_order_tracking_steps, calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, restore_order_inventory, verified_purchaser_ids
+from .services.lux import get_lux
 from django.contrib.auth import views as auth_views
 
 logger = logging.getLogger(__name__)
@@ -1192,3 +1193,36 @@ def trust_page(request, page):
     if page not in pages:
         raise Http404
     return render(request, "storefront/trust_page.html", {"page": page})
+
+
+@require_POST
+def chat_message(request):
+    """Handle Lux chatbot messages via AJAX."""
+    try:
+        data = json.loads(request.body)
+        message = data.get('message', '').strip()
+        session_id = data.get('session_id', str(uuid4()))
+
+        if not message:
+            return JsonResponse({'error': 'Message cannot be empty'}, status=400)
+
+        # Build user context if authenticated
+        user_context = {}
+        if request.user.is_authenticated:
+            user_context = {"username": request.user.get_full_name() or request.user.username}
+
+        # Get Lux's response
+        lux = get_lux()
+        response = lux.chat(message, session_id, user_context)
+
+        return JsonResponse({
+            'reply': response,
+            'session_id': session_id,
+            'suggestions': ['Track order', 'Returns', 'Size guide', 'Support']
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON in request body'}, status=400)
+    except Exception as e:
+        logger.exception(f"Lux chat error: {str(e)}")
+        return JsonResponse({'error': 'An error occurred. Please try again.'}, status=500)

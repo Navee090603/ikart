@@ -168,6 +168,14 @@ try:
 except InvalidOperation:
     TAX_RATE = Decimal("0")
 
+# AI Provider Configuration for Lux Chatbot
+# Supports: 'claude' (default), 'openai', 'ollama'
+# Switch providers by changing AI_PROVIDER env var (no code changes needed!)
+AI_PROVIDER = env("AI_PROVIDER", default="claude")
+CLAUDE_API_KEY = env("CLAUDE_API_KEY", default="")
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+OLLAMA_BASE_URL = env("OLLAMA_BASE_URL", default="http://localhost:11434")
+
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_SSL_REDIRECT = True

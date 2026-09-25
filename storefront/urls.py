@@ -48,7 +48,8 @@ urlpatterns = [
     path("support/<int:ticket_id>/", views.support_ticket, name="support_ticket"),
     path("notification-preferences/", views.notification_preferences, name="notification_preferences"),
     path("dashboard/analytics/", views.analytics_dashboard, name="analytics_dashboard"),
-        path(
+    path("chat/", views.chat_message, name="chat_message"),
+    path(
         "password-reset/",
         views.IKartPasswordResetView.as_view(
             template_name="storefront/password_reset.html",

@@ -1,0 +1,428 @@
+/**
+ * Lux Chatbot Widget Styles
+ * Provider-agnostic, responsive, accessible chatbot UI
+ * Uses IKart design system CSS variables for theming
+ */
+
+:root {
+  --lux-brand: var(--brand, #f59e0b);
+  --lux-surface: var(--surface-raised, #ffffff);
+  --lux-text: var(--ink, #1f2937);
+  --lux-text-muted: var(--ink-muted, #6b7280);
+  --lux-border: var(--border, #e5e7eb);
+  --lux-radius: var(--radius-md, 14px);
+  --lux-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+  --lux-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lux-surface: var(--surface-raised, #1f2937);
+    --lux-text: var(--ink, #f3f4f6);
+    --lux-text-muted: var(--ink-muted, #9ca3af);
+    --lux-border: var(--border, #374151);
+  }
+}
+
+/* Main widget container */
+#lux-widget {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  z-index: 9999;
+}
+
+/* Floating button */
+.lux-button {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: var(--lux-brand);
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: var(--lux-transition);
+  position: relative;
+}
+
+.lux-button:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+
+.lux-button:active {
+  transform: scale(0.95);
+}
+
+.lux-button-open {
+  transform: scale(0.9);
+  background: var(--lux-text);
+}
+
+/* Unread badge */
+.lux-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #ef4444;
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Chat panel */
+.lux-panel {
+  position: absolute;
+  bottom: 90px;
+  right: 0;
+  width: 380px;
+  height: 600px;
+  background: var(--lux-surface);
+  border-radius: var(--lux-radius);
+  box-shadow: var(--lux-shadow);
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transform: scale(0.8) translateY(20px);
+  transition: var(--lux-transition);
+  pointer-events: none;
+  overflow: hidden;
+  border: 1px solid var(--lux-border);
+}
+
+.lux-panel.lux-open {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+  pointer-events: auto;
+}
+
+/* Header */
+.lux-header {
+  padding: 16px;
+  background: linear-gradient(135deg, var(--lux-brand) 0%, rgba(245, 158, 11, 0.8) 100%);
+  color: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.lux-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lux-title > span:first-child {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.lux-subtitle {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.lux-close {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: var(--lux-transition);
+}
+
+.lux-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Messages container */
+.lux-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Message bubbles */
+.lux-message {
+  display: flex;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lux-message-user {
+  justify-content: flex-end;
+}
+
+.lux-message-bot {
+  justify-content: flex-start;
+}
+
+.lux-message-content {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.4;
+  word-wrap: break-word;
+}
+
+.lux-message-user .lux-message-content {
+  background: var(--lux-brand);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.lux-message-bot .lux-message-content {
+  background: var(--lux-border);
+  color: var(--lux-text);
+  border-bottom-left-radius: 4px;
+}
+
+/* Typing indicator */
+.lux-typing-dots {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  height: 16px;
+}
+
+.lux-typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lux-text-muted);
+  animation: typing 1.4s infinite;
+}
+
+.lux-typing-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.lux-typing-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    opacity: 0.5;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-8px);
+  }
+}
+
+/* Suggestions */
+.lux-suggestions {
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+  transition: var(--lux-transition);
+}
+
+.lux-suggestions[style*="display: none"] {
+  display: none !important;
+}
+
+.lux-suggestion {
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid var(--lux-border);
+  border-radius: 6px;
+  color: var(--lux-text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: var(--lux-transition);
+  text-align: left;
+}
+
+.lux-suggestion:hover {
+  background: var(--lux-border);
+  border-color: var(--lux-brand);
+}
+
+.lux-suggestion:active {
+  transform: scale(0.98);
+}
+
+/* Input area */
+.lux-input-area {
+  padding: 12px;
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  background: var(--lux-surface);
+  border-top: 1px solid var(--lux-border);
+}
+
+.lux-input {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--lux-border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--lux-surface);
+  color: var(--lux-text);
+  transition: var(--lux-transition);
+}
+
+.lux-input:focus {
+  outline: none;
+  border-color: var(--lux-brand);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.1);
+}
+
+.lux-input::placeholder {
+  color: var(--lux-text-muted);
+}
+
+/* Send button */
+.lux-send {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: var(--lux-brand);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--lux-transition);
+  flex-shrink: 0;
+}
+
+.lux-send:hover {
+  background: rgba(245, 158, 11, 0.9);
+  transform: translateY(-2px);
+}
+
+.lux-send:active {
+  transform: translateY(0);
+}
+
+/* Scrollbar styling */
+.lux-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.lux-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.lux-messages::-webkit-scrollbar-thumb {
+  background: var(--lux-border);
+  border-radius: 3px;
+}
+
+.lux-messages::-webkit-scrollbar-thumb:hover {
+  background: var(--lux-text-muted);
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  #lux-widget {
+    bottom: 10px;
+    right: 10px;
+  }
+
+  .lux-button {
+    width: 50px;
+    height: 50px;
+  }
+
+  .lux-panel {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    left: 0;
+    top: auto;
+    width: 100%;
+    height: 70vh;
+    border-radius: var(--lux-radius) var(--lux-radius) 0 0;
+    transform: translateY(100%);
+  }
+
+  .lux-panel.lux-open {
+    transform: translateY(0);
+  }
+
+  .lux-message-content {
+    max-width: 90%;
+  }
+
+  .lux-input-area {
+    padding: 10px;
+  }
+
+  .lux-input {
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+}
+
+/* Accessibility */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Focus visible for keyboard navigation */
+.lux-button:focus-visible,
+.lux-close:focus-visible,
+.lux-suggestion:focus-visible,
+.lux-send:focus-visible {
+  outline: 2px solid var(--lux-brand);
+  outline-offset: 2px;
+}
+
+.lux-input:focus-visible {
+  outline: 2px solid var(--lux-brand);
+  outline-offset: -1px;
+}
