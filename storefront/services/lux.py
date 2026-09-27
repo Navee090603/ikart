@@ -26,7 +26,7 @@ class LuxChatbot:
 
     def __init__(self):
         """Initialize Lux with configured AI provider."""
-        self.provider_name = getattr(settings, "AI_PROVIDER", "claude")
+        self.provider_name = getattr(settings, "AI_PROVIDER", "groq")
         self.provider = self._init_provider()
 
     def _init_provider(self):
@@ -35,7 +35,7 @@ class LuxChatbot:
             api_key = getattr(settings, "CLAUDE_API_KEY", "")
             if not api_key:
                 raise ValueError("CLAUDE_API_KEY not configured in settings")
-            return get_ai_provider("claude", api_key=api_key)
+            return get_ai_provider("claude", api_key=api_key, model=settings.CLAUDE_MODEL)
 
         elif self.provider_name == "groq":
             api_key = getattr(settings, "GROQ_API_KEY", "")

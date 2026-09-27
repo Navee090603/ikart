@@ -26,9 +26,9 @@ class AIProvider(ABC):
 class ClaudeProvider(AIProvider):
     """Anthropic Claude API implementation."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = "claude-haiku-4-5-20251001"):
         self.client = anthropic.Anthropic(api_key=api_key)
-        self.model = "claude-3-5-sonnet-20241022"
+        self.model = model
 
     def get_response(self, system_prompt: str, message: str) -> str:
         try:

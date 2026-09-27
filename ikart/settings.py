@@ -174,10 +174,11 @@ except InvalidOperation:
     TAX_RATE = Decimal("0")
 
 # AI Provider Configuration for Lux Chatbot
-# Supports: 'claude' (default), 'groq', 'openai', 'ollama'
+# Supports: 'groq' (default), 'claude', 'openai', 'ollama'
 # Switch providers by changing AI_PROVIDER env var (no code changes needed!)
-AI_PROVIDER = env("AI_PROVIDER", default="claude")
+AI_PROVIDER = env("AI_PROVIDER", default="groq")
 CLAUDE_API_KEY = env("CLAUDE_API_KEY", default="")
+CLAUDE_MODEL = env("CLAUDE_MODEL", default="claude-haiku-4-5-20251001")
 GROQ_API_KEY = env("GROQ_API_KEY", default="")
 GROQ_MODEL = env("GROQ_MODEL", default="openai/gpt-oss-20b")
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")

@@ -1095,6 +1095,14 @@ class ShoppingFlowTests(TestCase):
         self.assertNotIn(hidden.get_absolute_url(), xml)
         self.assertIn("http://testserver/returns/", xml)
 
+    @patch("storefront.services.ai_providers.anthropic.Anthropic")
+    def test_claude_provider_uses_configured_model(self, anthropic_client):
+        from .services import lux as lux_module
+        lux_module._lux_instance = None
+        self.addCleanup(setattr, lux_module, "_lux_instance", None)
+        with self.settings(AI_PROVIDER="claude", CLAUDE_API_KEY="test", CLAUDE_MODEL="claude-test-model"):
+            self.assertEqual(lux_module.get_lux().provider.model, "claude-test-model")
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings
