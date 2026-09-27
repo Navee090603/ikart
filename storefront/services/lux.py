@@ -12,6 +12,14 @@ from .lux_prompt import build_system_prompt
 
 logger = logging.getLogger(__name__)
 
+# The model sometimes emits zero-width spaces and non-breaking hyphens, which break the
+# page paths the chat widget turns into links (e.g. "/\u200bproduct/nike\u2011air/").
+# ZWJ/ZWNJ (U+200C/D) are kept: Indic scripts such as Hindi and Tamil need them.
+_REPLY_CLEANUP = str.maketrans({
+    "\u200b": None, "\u2060": None, "\ufeff": None,
+    "\u2010": "-", "\u2011": "-",
+})
+
 
 class LuxChatbot:
     """Lux chatbot service - main orchestrator for customer interactions."""
@@ -73,7 +81,7 @@ class LuxChatbot:
                 context, products=relevant_products(message), orders=customer_orders(user, message),
             )
             response = self.provider.get_response(prompt, message)
-            return response or "I'm thinking... Let me connect you with our support team instead."
+            return response.translate(_REPLY_CLEANUP) if response else "I'm thinking... Let me connect you with our support team instead."
         except Exception:
             # Graceful fallback for any provider errors
             logger.exception("Lux provider error")

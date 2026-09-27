@@ -998,6 +998,28 @@ class ShoppingFlowTests(TestCase):
         self.assertEqual(page.count("products/x.jpg"), 8)  # 4 related products in both rows
         self.assertEqual(self.card_page_queries(url), before)
 
+    @patch("storefront.services.lux.get_ai_provider")
+    def test_lux_reply_links_are_cleaned_of_invisible_and_lookalike_characters(self, get_provider):
+        from .services import lux as lux_module
+        lux_module._lux_instance = None
+        self.addCleanup(setattr, lux_module, "_lux_instance", None)
+        get_provider.return_value.get_response.return_value = (
+            "Try the Nike Air Max Runner \u2013 \u20b95999 \u2013 /\u200bproduct/nike\u2011air\u2011max\u2011runner/\ufeff"
+        )
+        with self.settings(AI_PROVIDER="groq", GROQ_API_KEY="test"):
+            reply = self.client.post(reverse("storefront:chat_message"), data=json.dumps({"message": "shoes?"}),
+                                     content_type="application/json").json()["reply"]
+        self.assertIn("/product/nike-air-max-runner/", reply)
+        self.assertNotIn("\u200b", reply)
+        self.assertNotIn("\ufeff", reply)
+        self.assertIn("\u2013 \u20b95999", reply)  # ordinary dashes in the prose are left alone
+
+        get_provider.return_value.get_response.return_value = "\u0915\u094d\u200d\u0937"  # Hindi half-form uses ZWJ
+        with self.settings(AI_PROVIDER="groq", GROQ_API_KEY="test"):
+            reply = self.client.post(reverse("storefront:chat_message"), data=json.dumps({"message": "hi"}),
+                                     content_type="application/json").json()["reply"]
+        self.assertEqual(reply, "\u0915\u094d\u200d\u0937")
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings
