@@ -350,7 +350,7 @@ def frequently_bought_together(product, limit=4):
     if not ids:
         return Product.objects.none()
     ordering = Case(*[When(id=product_id, then=position) for position, product_id in enumerate(ids)], output_field=IntegerField())
-    return Product.objects.filter(id__in=ids, is_active=True).order_by(ordering)
+    return Product.objects.filter(id__in=ids, is_active=True).prefetch_related("images").order_by(ordering)
 
 
 # Orders in these states never resulted in the buyer actually keeping the
@@ -384,7 +384,7 @@ def customers_also_viewed(product, limit=4):
     if not ids:
         return Product.objects.none()
     ordering = Case(*[When(id=product_id, then=position) for position, product_id in enumerate(ids)], output_field=IntegerField())
-    return Product.objects.filter(id__in=ids, is_active=True).order_by(ordering)
+    return Product.objects.filter(id__in=ids, is_active=True).prefetch_related("images").order_by(ordering)
 
 
 def notify_order_email(order, event, subject, message):

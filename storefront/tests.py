@@ -972,6 +972,32 @@ class ShoppingFlowTests(TestCase):
             self.client.post(reverse("password_change"), {"old_password": "", "new_password1": "", "new_password2": ""}),
             ["id_old_password", "id_new_password1", "id_new_password2"])
 
+    def add_related_products(self, count, buyer):
+        from .models import ProductImage, ProductView
+        for _ in range(count):
+            other = Product.objects.create(category=self.product.category, name=f"Related {Product.objects.count()}",
+                                           short_description="x", description="x", price="100", stock=5)
+            ProductImage.objects.create(product=other, image="products/x.jpg", alt_text="x")
+            order = Order.objects.create(user=buyer, email=buyer.email, full_name="B", phone="9999999999", address_line1="1",
+                                         city="Pune", state="MH", postal_code="411001", payment_method="cod",
+                                         subtotal="1", total="1", status=Order.Status.DELIVERED)
+            OrderItem.objects.create(order=order, product=self.product, product_name="m", quantity=1, unit_price="1")
+            OrderItem.objects.create(order=order, product=other, product_name="o", quantity=1, unit_price="1")
+            session = f"s{other.pk}"
+            ProductView.objects.create(product=self.product, session_key=session)
+            ProductView.objects.create(product=other, session_key=session)
+
+    def test_product_page_query_count_does_not_grow_with_related_products(self):
+        buyer = User.objects.create_user("buyer", "buyer@example.com", "Secur3Password!")
+        url = self.product.get_absolute_url()
+        self.add_related_products(1, buyer)
+        self.client.get(url)
+        before = self.card_page_queries(url)
+        self.add_related_products(3, buyer)
+        page = self.client.get(url).content.decode()
+        self.assertEqual(page.count("products/x.jpg"), 8)  # 4 related products in both rows
+        self.assertEqual(self.card_page_queries(url), before)
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings
