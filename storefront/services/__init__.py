@@ -281,7 +281,7 @@ def release_stale_payment_reservations(cutoff, client=None):
             if state == "paid":
                 if int(provider_payment.get("amount", 0)) == int(payment.amount * 100):
                     order = mark_payment_captured(payment, provider_payment["id"], provider_payment)
-                    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", f"Your payment was successful. Total paid: ₹{order.total}")
+                    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", payment_captured_message(order))
                 continue
         order = fail_or_cancel_payment(payment, PaymentTransaction.Status.CANCELLED, {"reason": "payment_reservation_expired"})
         if order.payment_status == "cancelled":
@@ -406,6 +406,67 @@ def customers_also_viewed(product, limit=4):
         return Product.objects.none()
     ordering = Case(*[When(id=product_id, then=position) for position, product_id in enumerate(ids)], output_field=IntegerField())
     return Product.objects.filter(id__in=ids, is_active=True).prefetch_related("images").order_by(ordering)
+
+
+REFUND_TIMELINE = "Banks usually credit refunds within 5–7 working days."
+PAYMENT_METHOD_LABELS = {"card": "Card", "upi": "UPI", "netbanking": "Net banking", "wallet": "Wallet", "emi": "EMI"}
+
+
+def payment_details(order):
+    """Customer-facing payment and refund facts for an online order, or None (e.g. cash on delivery)."""
+    payment = PaymentTransaction.objects.filter(order=order).first()
+    if not payment:
+        return None
+    payload = payment.provider_payload or {}
+    method = (payload.get("payment") or {}).get("method", "")
+    details = {"payment_id": payment.provider_payment_id, "method": PAYMENT_METHOD_LABELS.get(method, method.title())}
+    refund = payload.get("refund") or {}
+    if payment.provider_refund_id or refund:
+        if payment.status == PaymentTransaction.Status.REFUNDED:
+            status = "processed"
+        elif order.payment_status == "refund_failed":
+            status = "failed"
+        else:
+            status = "pending"
+        details["refund"] = {
+            "id": refund.get("id") or payment.provider_refund_id,
+            "amount": (Decimal(refund["amount"]) / 100).quantize(Decimal("0.01")) if refund.get("amount") else payment.amount,
+            "status": status,
+            "arn": (refund.get("acquirer_data") or {}).get("arn", ""),
+        }
+    return details
+
+
+def _destination(details):
+    return f"your original payment method ({details['method']})" if details.get("method") else "your original payment method"
+
+
+def payment_captured_message(order):
+    details = payment_details(order) or {}
+    lines = [f"Your payment of ₹{Decimal(order.total):.2f} for order {order.number} was successful."]
+    if details.get("payment_id"):
+        method = f" · {details['method']}" if details.get("method") else ""
+        lines.append(f"Payment reference: {details['payment_id']}{method}")
+    return "\n".join(lines)
+
+
+def refund_message(order):
+    details = payment_details(order) or {}
+    refund = details.get("refund")
+    if not refund:
+        return "Your refund has been initiated. Our support team can help if you have questions."
+    if refund["status"] == "processed":
+        lines = [f"Your refund of ₹{refund['amount']} for order {order.number} has been sent to {_destination(details)}.",
+                 REFUND_TIMELINE, f"Refund reference: {refund['id']}"]
+        if refund["arn"]:
+            lines += [f"Bank reference (ARN): {refund['arn']}",
+                      "If the money hasn't arrived after 7 working days, contact your bank and quote the ARN."]
+        return "\n".join(lines)
+    return "\n".join([
+        f"We've started a refund of ₹{refund['amount']} for order {order.number} to {_destination(details)}.",
+        f"We'll email you again once the payment provider confirms it. {REFUND_TIMELINE}",
+        f"Refund reference: {refund['id']}",
+    ])
 
 
 def notify_order_email(order, event, subject, message):

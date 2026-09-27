@@ -32,7 +32,7 @@ from .forms import AddressForm, ChangePendingEmailForm, CheckoutForm, MarketingP
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductQuestion, ProductVariant, ProductView, Review, SavedForLaterItem, Shipment, SupportTicket, UserProfile, WishlistItem
 from .payments.razorpay_links import PaymentLinkError, cancel_payment_link, create_payment_link, verify_payment_link_signature
 from .ratelimit import rate_limit
-from .services import build_order_tracking_steps, calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, release_expired_reservations_if_due, restore_order_inventory, run_daily_cleanup_if_due, verified_purchaser_ids
+from .services import build_order_tracking_steps, calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, payment_captured_message, payment_details, refund_message, release_expired_reservations_if_due, restore_order_inventory, run_daily_cleanup_if_due, verified_purchaser_ids
 from .services.lux import get_lux
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.views import redirect_to_login
@@ -710,7 +710,7 @@ def razorpay_payment_link_callback(request, number):
     Cart(request).clear()
     request.session.pop("checkout_token", None)
     _remember_order(request, order.number)
-    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", f"Your payment was successful. Total paid: ₹{order.total}")
+    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", payment_captured_message(order))
     return redirect("storefront:order_confirmation", number=order.number)
 
 
@@ -797,7 +797,7 @@ def verify_razorpay_payment(request, number):
     request.session.pop("checkout_token", None)
     _remember_order(request, order.number)
     if order.payment_status == "paid":
-        notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", f"Your payment was successful. Total paid: ₹{order.total}")
+        notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", payment_captured_message(order))
     else:
         notify_order_email(order, "payment_review", f"Payment received for order {order.number}", "Your payment was received and is being reviewed because the item is no longer available.")
     return redirect("storefront:order_confirmation", number=order.number)
@@ -938,7 +938,7 @@ def razorpay_webhook(request):
             }:
                 order = mark_payment_captured(payment, entity.get("id", ""), entity)
                 if order.payment_status == "paid":
-                    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", f"Your payment was successful. Total paid: ₹{order.total}")
+                    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", payment_captured_message(order))
                 else:
                     notify_order_email(order, "payment_review", f"Payment received for order {order.number}", "Your payment was received and is being reviewed before fulfilment.")
         elif event == "payment.failed" and payment.status in {PaymentTransaction.Status.CREATED, PaymentTransaction.Status.AUTHORIZED}:
@@ -961,7 +961,7 @@ def razorpay_webhook(request):
                 payment.order.save(update_fields=["payment_status", "updated_at"])
         elif event == "refund.processed":
             order = _apply_refund_webhook(payment, refund_entity, succeeded=True)
-            notify_order_email(order, "refund_processed", f"Order {order.number}: refund processed", "Your refund has been processed by the payment provider.")
+            notify_order_email(order, "refund_processed", f"Order {order.number}: refund processed", refund_message(order))
         elif event == "refund.failed":
             order = _apply_refund_webhook(payment, refund_entity, succeeded=False)
             notify_order_email(order, "refund_failed", f"Order {order.number}: refund needs attention", "Your refund could not be processed yet. Our support team will contact you.")
@@ -985,6 +985,7 @@ def order_confirmation(request, number):
         "shipment": getattr(order, "shipment", None),
         "requests": order.requests.all(),
         "tracking_steps": build_order_tracking_steps(order),
+        "payment_info": payment_details(order),
     })
 
 

@@ -1109,6 +1109,82 @@ class ShoppingFlowTests(TestCase):
         self.assertIn("Groq", page)
         self.assertIn("never sent", page)
 
+    def paid_online_order(self, user, **payment_fields):
+        order = Order.objects.create(
+            user=user, email=user.email, full_name="Buyer", phone="9999999999", address_line1="1 Main", city="Pune",
+            state="Maharashtra", postal_code="411001", payment_method="razorpay", payment_status="paid",
+            subtotal="348", total="348", status=Order.Status.PLACED, inventory_deducted=True,
+        )
+        OrderItem.objects.create(order=order, product=self.product, product_name=self.product.name, quantity=1, unit_price="348")
+        payment = PaymentTransaction.objects.create(
+            order=order, provider_payment_id="pay_abc123", amount="348", status=PaymentTransaction.Status.CAPTURED,
+            provider_payload={"payment": {"id": "pay_abc123", "method": "netbanking", "bank": "CNRB"}}, **payment_fields,
+        )
+        return order, payment
+
+    def test_payment_confirmation_email_has_amount_reference_and_method(self):
+        from .services import mark_payment_captured
+        user = self.login_customer()
+        order, payment = self.paid_online_order(user)
+        PaymentTransaction.objects.filter(pk=payment.pk).update(status=PaymentTransaction.Status.CREATED)
+        payment.refresh_from_db()
+        order.status, order.payment_status = Order.Status.PAYMENT_PENDING, "initiated"
+        order.save()
+        mark_payment_captured(payment, "pay_abc123", {"id": "pay_abc123", "method": "upi", "amount": 34800})
+        from .services import payment_captured_message
+        body = payment_captured_message(order)
+        self.assertIn("\u20b9348.00", body)
+        self.assertIn("pay_abc123", body)
+        self.assertIn("UPI", body)
+
+    @patch("storefront.admin.refund_captured_payment")
+    def test_refund_started_email_has_amount_timeline_and_reference(self, refund):
+        from django.contrib import admin as django_admin
+        from django.contrib.messages.storage.fallback import FallbackStorage
+        from django.test import RequestFactory
+        from .admin import OrderRequestAdmin
+        user = self.login_customer()
+        order, payment = self.paid_online_order(user)
+        Order.objects.filter(pk=order.pk).update(status=Order.Status.CANCELLATION_REQUESTED)
+        def start_refund(target):
+            PaymentTransaction.objects.filter(pk=payment.pk).update(
+                status=PaymentTransaction.Status.REFUND_PENDING, provider_refund_id="rfnd_xyz",
+                provider_payload={**payment.provider_payload, "refund": {"id": "rfnd_xyz", "amount": 34800, "status": "pending"}})
+            return PaymentTransaction.objects.get(pk=payment.pk)
+        refund.side_effect = start_refund
+        change = OrderRequest.objects.create(order=Order.objects.get(pk=order.pk), user=user, request_type="cancellation", reason="changed_mind")
+        change.status = OrderRequest.Status.APPROVED
+        request = RequestFactory().post("/")
+        request.session = self.client.session
+        request._messages = FallbackStorage(request)
+        mail.outbox.clear()
+        OrderRequestAdmin(OrderRequest, django_admin.site).save_model(request, change, None, True)
+        body = mail.outbox[-1].body
+        self.assertIn("\u20b9348.00", body)
+        self.assertIn("rfnd_xyz", body)
+        self.assertIn("5\u20137 working days", body)
+        self.assertIn("Net banking", body)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_WEBHOOK_SECRET="webhook-secret")
+    @patch("storefront.views.razorpay.Client")
+    def test_refund_processed_email_and_order_page_show_arn(self, client_class):
+        user = self.login_customer()
+        order, payment = self.paid_online_order(user, provider_refund_id="rfnd_xyz")
+        PaymentTransaction.objects.filter(pk=payment.pk).update(status=PaymentTransaction.Status.REFUND_PENDING)
+        Order.objects.filter(pk=order.pk).update(status=Order.Status.CANCELLED, payment_status="refund_pending")
+        payload = {"event": "refund.processed", "payload": {"refund": {"entity": {
+            "id": "rfnd_xyz", "payment_id": "pay_abc123", "amount": 34800, "currency": "INR", "status": "processed",
+            "acquirer_data": {"arn": "74332216123456789012345"}}}}}
+        mail.outbox.clear()
+        self.client.post(reverse("storefront:razorpay_webhook"), data=json.dumps(payload), content_type="application/json",
+                         headers={"X-Razorpay-Signature": "valid", "X-Razorpay-Event-Id": "event-refund-arn"})
+        body = mail.outbox[-1].body
+        for expected in ("\u20b9348.00", "rfnd_xyz", "74332216123456789012345", "5\u20137 working days", "Net banking"):
+            self.assertIn(expected, body)
+        page = self.client.get(reverse("storefront:order_confirmation", args=[order.number])).content.decode()
+        for expected in ("\u20b9348.00", "rfnd_xyz", "74332216123456789012345", "5\u20137 working days"):
+            self.assertIn(expected, page)
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings

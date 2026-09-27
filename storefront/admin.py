@@ -23,7 +23,7 @@ from .forms import CategoryCSVUploadForm
 from django.core.mail import send_mail
 
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, HeroSection, MarketingPreference, NotificationLog, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductImage, ProductQuestion, ProductVariant, Review, SavedForLaterItem, Shipment, ShipmentEvent, SupportTicket, SupportTicketReply, UserProfile, WishlistItem
-from .services import fail_or_cancel_payment, notify_order_email, refund_captured_payment, release_coupon_redemption, restore_order_inventory
+from .services import fail_or_cancel_payment, notify_order_email, refund_captured_payment, refund_message, release_coupon_redemption, restore_order_inventory
 
 logger = logging.getLogger(__name__)
 
@@ -770,7 +770,7 @@ class OrderRequestAdmin(admin.ModelAdmin):
                 release_coupon_redemption(order)
             order.payment_status = "refund_pending"
             order.save(update_fields=["status", "payment_status", "updated_at"])
-            notify_order_email(order, "refund_pending", f"Order {order.number}: refund initiated", "Your refund has been initiated and is awaiting confirmation from the payment provider.")
+            notify_order_email(order, "refund_pending", f"Order {order.number}: refund initiated", refund_message(order))
             return
         elif obj.status == OrderRequest.Status.REJECTED and previous_status != obj.status:
             restored_status = {

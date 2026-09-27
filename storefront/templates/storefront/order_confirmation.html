@@ -62,6 +62,21 @@
           {{ order.phone }}</p>
         <h2 class="ik-eyebrow mt-5 mb-2">Payment</h2>
         <p class="text-[15px]">{{ order.get_payment_method_display }} · {{ order.get_delivery_option_display }}</p>
+        {% if payment_info.payment_id %}<p class="text-sm ik-muted mt-1">Payment reference: {{ payment_info.payment_id }}{% if payment_info.method %} · {{ payment_info.method }}{% endif %}</p>{% endif %}
+        {% with refund=payment_info.refund %}{% if refund %}
+        <h2 class="ik-eyebrow mt-5 mb-2">Refund</h2>
+        <div class="text-[15px] leading-6">
+          {% if refund.status == 'processed' %}
+          <p><strong>₹{{ refund.amount }}</strong> sent to your original payment method{% if payment_info.method %} ({{ payment_info.method }}){% endif %}. Banks usually credit refunds within 5–7 working days.</p>
+          {% elif refund.status == 'failed' %}
+          <p><strong>₹{{ refund.amount }}</strong> refund couldn't be completed yet. Our support team will contact you.</p>
+          {% else %}
+          <p><strong>₹{{ refund.amount }}</strong> refund in progress to your original payment method{% if payment_info.method %} ({{ payment_info.method }}){% endif %}. Banks usually credit refunds within 5–7 working days once it's confirmed.</p>
+          {% endif %}
+          <p class="text-sm ik-muted mt-1">Refund reference: {{ refund.id }}</p>
+          {% if refund.arn %}<p class="text-sm ik-muted">Bank reference (ARN): {{ refund.arn }}. If the money hasn't arrived after 7 working days, contact your bank and quote this number.</p>{% endif %}
+        </div>
+        {% endif %}{% endwith %}
       </section>
     </div>
 
