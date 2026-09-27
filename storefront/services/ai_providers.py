@@ -125,46 +125,60 @@ class GroqProvider(AIProvider):
         system_prompt = self._build_system_prompt(context)
 
         try:
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": message}
+                ],
+                "max_tokens": 500,
+                "temperature": 0.7
+            }
+
+            logger.info(f"Groq API call: model={self.model}, url={self.api_url}")
+
             response = requests.post(
                 self.api_url,
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json"
                 },
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": message}
-                    ],
-                    "max_tokens": 500,
-                    "temperature": 0.7
-                },
+                json=payload,
                 timeout=10
             )
 
+            logger.info(f"Groq response status: {response.status_code}")
+
             if response.status_code == 200:
                 data = response.json()
-                return data["choices"][0]["message"]["content"]
+                result = data["choices"][0]["message"]["content"]
+                logger.info(f"Groq success: {result[:50]}...")
+                return result
             elif response.status_code == 401:
-                logger.error(f"Groq authentication failed: {response.text}")
-                return "Authentication failed. Please check your API key."
+                error_text = response.text
+                logger.error(f"Groq authentication failed: {error_text}")
+                return "Groq API key is invalid or expired."
             elif response.status_code == 429:
                 logger.warning("Groq rate limit exceeded")
                 return "I'm experiencing high demand. Please try again in a moment!"
+            elif response.status_code == 400:
+                error_text = response.text
+                logger.error(f"Groq bad request (400): {error_text}")
+                return f"Invalid request to Groq. Error: {error_text[:100]}"
             else:
-                logger.error(f"Groq API error {response.status_code}: {response.text}")
-                return f"API error {response.status_code}. Our support team is here to help: /support/"
+                error_text = response.text
+                logger.error(f"Groq API error {response.status_code}: {error_text}")
+                return f"Groq API error {response.status_code}: {error_text[:100]}"
 
         except requests.exceptions.Timeout:
             logger.error("Groq API request timed out")
-            return "Request timed out. Please try again."
+            return "Request timed out. Groq server is slow. Please try again."
         except requests.exceptions.RequestException as e:
             logger.exception(f"Groq API request failed: {str(e)}")
-            return f"Connection error: {str(e)}"
+            return f"Connection failed: {str(e)[:100]}"
         except Exception as e:
             logger.exception(f"Groq provider error: {str(e)}")
-            return f"Error: {str(e)}"
+            return f"Error: {str(e)[:100]}"
 
     def _build_system_prompt(self, context: Optional[dict] = None) -> str:
         """Build Lux system prompt with optional user context."""
