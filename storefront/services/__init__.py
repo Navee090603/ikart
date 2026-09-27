@@ -56,7 +56,7 @@ def build_order_tracking_steps(order):
 def calculate_cart_quote(cart, user=None, delivery_option=Order.DeliveryOption.STANDARD, coupon_code=""):
     """The only source of truth for cart, checkout, and payment amounts."""
     subtotal = cart.subtotal
-    delivery_fee = Decimal("99") if delivery_option == Order.DeliveryOption.EXPRESS else (Decimal("0") if subtotal >= 499 else Decimal("49"))
+    delivery_fee = Decimal("99") if delivery_option == Order.DeliveryOption.EXPRESS else Decimal("0")
     coupon = None
     discount_amount = Decimal("0")
     coupon_error = ""
