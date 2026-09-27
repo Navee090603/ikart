@@ -4,7 +4,7 @@
 <div class="ik-page flex flex-col gap-6">
   <div class="flex flex-wrap justify-between items-center gap-3">
     <h1 class="ik-h1">Store analytics</h1>
-    <a class="ik-btn ik-btn-secondary ik-btn-sm" href="/admin/">Open admin</a>
+    <a class="ik-btn ik-btn-secondary ik-btn-sm" href="{% url 'admin:index' %}">Open admin</a>
   </div>
   <div class="grid md:grid-cols-2 gap-4">
     <div class="ik-panel"><p class="ik-eyebrow">Sales revenue</p><p class="text-3xl font-bold mt-2">₹{{ revenue }}</p></div>

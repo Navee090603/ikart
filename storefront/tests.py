@@ -161,6 +161,14 @@ class ShoppingFlowTests(TestCase):
         self.client.login(username=staff.username, password="Secur3Password!")
         self.assertEqual(self.client.get(reverse("storefront:analytics_dashboard")).status_code, 200)
 
+    @override_settings(ROOT_URLCONF="storefront.tests_admin_urlconf")
+    def test_analytics_admin_link_follows_admin_url(self):
+        staff = User.objects.create_superuser("boss", "boss@example.com", "Secur3Password!")
+        self.client.force_login(staff)
+        page = self.client.get(reverse("storefront:analytics_dashboard")).content.decode()
+        self.assertIn('href="/staff-test/"', page)
+        self.assertNotIn('href="/admin/"', page)
+
     def test_coupon_quote_refreshes_and_checkout_recalculates_on_the_server(self):
         coupon = Coupon.objects.create(code="SAVE10", discount_type="percent", value="10", minimum_order_amount="100")
         self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 2})
