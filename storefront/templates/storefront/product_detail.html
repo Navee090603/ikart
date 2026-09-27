@@ -154,7 +154,7 @@
           {% csrf_token %}
           <label for="{{ question_form.question.id_for_label }}">Ask a question</label>
           {{ question_form.question }}
-          {% for error in question_form.question.errors %}<p class="ik-error">{{ error }}</p>{% endfor %}
+          {% if question_form.question.errors %}<p id="{{ question_form.question.id_for_label }}_error" class="ik-error">{{ question_form.question.errors|join:" " }}</p>{% endif %}
           <button class="ik-btn ik-btn-secondary self-start">Post question</button>
         </form>
         {% else %}

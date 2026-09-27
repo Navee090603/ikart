@@ -34,7 +34,7 @@
       <form id="coupon-form" class="ik-form">
         <label for="coupon-code">Coupon code</label>
         <div class="ik-inline-form">
-          <input id="coupon-code" value="{{ cart.coupon_code }}" placeholder="Enter code" autocomplete="off">
+          <input id="coupon-code" value="{{ cart.coupon_code }}" placeholder="Enter code" autocomplete="off" aria-describedby="coupon-error">
           <button class="ik-btn ik-btn-secondary">Apply</button>
         </div>
         <p id="coupon-error" class="ik-error" role="status">{{ quote.coupon_error }}</p>

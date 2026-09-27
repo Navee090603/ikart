@@ -14,7 +14,7 @@
         <div class="ik-field">
           <label for="{{ email_form.email.id_for_label }}">New email</label>
           {{ email_form.email }}
-          <p id="{{ email_form.email.id_for_label }}-error" class="ik-error{% if not email_form.email.errors %} hidden{% endif %}">{{ email_form.email.errors.0 }}</p>
+          <p id="{{ email_form.email.id_for_label }}_error" class="ik-error{% if not email_form.email.errors %} hidden{% endif %}">{{ email_form.email.errors.0 }}</p>
         </div>
         <button class="ik-btn ik-btn-secondary ik-btn-block">Update email &amp; resend code</button>
       </form>

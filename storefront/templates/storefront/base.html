@@ -183,11 +183,16 @@
     }
 
     function showError(input) {
-      const error = document.getElementById(input.id + '-error');
+      const error = document.getElementById(input.id + '_error');
       if (!error) return;
       const message = validate(input);
       error.textContent = message;
       error.classList.toggle('hidden', !message);
+      // Keep the field linked to its message (and help text) for screen readers, as Django does for server errors.
+      const help = document.getElementById(input.id + '_helptext');
+      const describedBy = [message ? error.id : '', help ? help.id : ''].filter(Boolean).join(' ');
+      if (message) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+      if (describedBy) input.setAttribute('aria-describedby', describedBy); else input.removeAttribute('aria-describedby');
     }
 
     document.querySelectorAll('form[data-live-validate] [data-validate]').forEach((input) => {

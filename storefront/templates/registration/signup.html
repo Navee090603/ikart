@@ -13,12 +13,13 @@
       <div class="ik-field">
         <label for="{{ form.username.id_for_label }}">Username</label>
         {{ form.username }}
-        <p id="{{ form.username.id_for_label }}-error" class="ik-error{% if not form.username.errors %} hidden{% endif %}">{{ form.username.errors.0 }}</p>
+        <p id="{{ form.username.id_for_label }}_error" class="ik-error{% if not form.username.errors %} hidden{% endif %}">{{ form.username.errors.0 }}</p>
+        {% if form.username.help_text %}<div id="{{ form.username.auto_id }}_helptext" class="ik-sr">{{ form.username.help_text }}</div>{% endif %}
       </div>
       <div class="ik-field">
         <label for="{{ form.email.id_for_label }}">Email</label>
         {{ form.email }}
-        <p id="{{ form.email.id_for_label }}-error" class="ik-error{% if not form.email.errors %} hidden{% endif %}">{{ form.email.errors.0 }}</p>
+        <p id="{{ form.email.id_for_label }}_error" class="ik-error{% if not form.email.errors %} hidden{% endif %}">{{ form.email.errors.0 }}</p>
       </div>
       <div class="ik-field">
         <label for="{{ form.password1.id_for_label }}">Password</label>
@@ -26,7 +27,8 @@
           {{ form.password1 }}
           <button type="button" class="pw-toggle" data-target="{{ form.password1.id_for_label }}" aria-label="Show or hide password">Show</button>
         </div>
-        <p id="{{ form.password1.id_for_label }}-error" class="ik-error{% if not form.password1.errors %} hidden{% endif %}">{{ form.password1.errors.0 }}</p>
+        <p id="{{ form.password1.id_for_label }}_error" class="ik-error{% if not form.password1.errors %} hidden{% endif %}">{{ form.password1.errors.0 }}</p>
+        {% if form.password1.help_text %}<div id="{{ form.password1.auto_id }}_helptext" class="ik-sr">{{ form.password1.help_text }}</div>{% endif %}
       </div>
       <div class="ik-field">
         <label for="{{ form.password2.id_for_label }}">Confirm password</label>
@@ -34,7 +36,8 @@
           {{ form.password2 }}
           <button type="button" class="pw-toggle" data-target="{{ form.password2.id_for_label }}" aria-label="Show or hide password">Show</button>
         </div>
-        <p id="{{ form.password2.id_for_label }}-error" class="ik-error{% if not form.password2.errors %} hidden{% endif %}">{{ form.password2.errors.0 }}</p>
+        <p id="{{ form.password2.id_for_label }}_error" class="ik-error{% if not form.password2.errors %} hidden{% endif %}">{{ form.password2.errors.0 }}</p>
+        {% if form.password2.help_text %}<div id="{{ form.password2.auto_id }}_helptext" class="ik-sr">{{ form.password2.help_text }}</div>{% endif %}
       </div>
       <button type="submit" class="ik-btn ik-btn-primary ik-btn-lg ik-btn-block">Create account</button>
     </form>

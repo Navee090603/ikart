@@ -938,6 +938,40 @@ class ShoppingFlowTests(TestCase):
         self.assertIn("out of 5, 1 review<", page)
         self.assertNotIn("2 reviews", page)
 
+    def assert_errors_linked_to_fields(self, response, expected_fields):
+        html = response.content.decode()
+        ids = set(re.findall(r'\bid="([^"]+)"', html))
+        for field_id in expected_fields:
+            tag = re.search(rf'<(?:input|textarea|select)[^>]*\bid="{field_id}"[^>]*>', html)
+            self.assertIsNotNone(tag, field_id)
+            self.assertIn('aria-invalid="true"', tag.group(0), field_id)
+            described = re.search(r'aria-describedby="([^"]+)"', tag.group(0))
+            self.assertIsNotNone(described, field_id)
+            for target in described.group(1).split():
+                self.assertIn(target, ids, f"{field_id} points to missing #{target}")
+                if target.endswith("_error"):
+                    error = re.search(rf'<p[^>]*\bid="{target}"[^>]*>([^<]*)', html)
+                    self.assertTrue(error and error.group(1).strip(), f"#{target} is empty")
+
+    def test_form_errors_are_linked_to_their_fields(self):
+        self.assert_errors_linked_to_fields(
+            self.client.post(reverse("login"), {"username": "", "password": ""}), ["id_username", "id_password"])
+        self.assert_errors_linked_to_fields(
+            self.client.post(reverse("storefront:password_reset"), {"email": "not-an-email"}), ["id_email"])
+        self.assert_errors_linked_to_fields(
+            self.client.post(reverse("storefront:signup"), {"username": "", "email": "bad", "password1": "", "password2": ""}),
+            ["id_username", "id_email", "id_password1"])
+        self.login_customer()
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
+        self.assert_errors_linked_to_fields(
+            self.client.post(reverse("storefront:checkout"), self.checkout_data(email="bad", full_name="", city="")),
+            ["id_email", "id_full_name", "id_city"])
+        self.assert_errors_linked_to_fields(
+            self.client.post(reverse("storefront:account"), {"phone": "x" * 200}), ["id_phone"])
+        self.assert_errors_linked_to_fields(
+            self.client.post(reverse("password_change"), {"old_password": "", "new_password1": "", "new_password2": ""}),
+            ["id_old_password", "id_new_password1", "id_new_password2"])
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings

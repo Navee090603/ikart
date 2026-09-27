@@ -14,7 +14,7 @@
     <div class="ik-field">
       <label for="{{ form.phone.id_for_label }}">Mobile number</label>
       {{ form.phone }}
-      {% for error in form.phone.errors %}<p class="ik-error">{{ error }}</p>{% endfor %}
+      {% if form.phone.errors %}<p id="{{ form.phone.id_for_label }}_error" class="ik-error">{{ form.phone.errors|join:" " }}</p>{% endif %}
     </div>
     <button class="ik-btn ik-btn-primary self-start">Save changes</button>
   </form>
