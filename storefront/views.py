@@ -228,7 +228,7 @@ def add_to_cart(request, product_id):
         return redirect(product.get_absolute_url())
     cart.add(product, quantity, variant)
     messages.success(request, f"{product.name} was added to your cart.")
-    return redirect(request.POST.get("next") or "storefront:cart")
+    return redirect(_safe_next(request) or "storefront:cart")
 
 
 def cart_detail(request):
@@ -333,7 +333,7 @@ def toggle_wishlist(request, product_id):
     else:
         WishlistItem.objects.create(user=request.user, product=product)
         messages.success(request, f"{product.name} was saved to your wishlist.")
-    return redirect(request.POST.get("next") or product.get_absolute_url())
+    return redirect(_safe_next(request) or product.get_absolute_url())
 
 
 @login_required

@@ -1046,6 +1046,15 @@ class ShoppingFlowTests(TestCase):
         self.client.get(self.product.get_absolute_url())
         self.assertTrue(Session.objects.filter(pk=again.pk).exists())
 
+    def test_next_redirects_stay_on_this_site(self):
+        self.login_customer()
+        cases = (("https://evil.example.com/", None), ("//evil.example.com/", None), ("/shop/", "/shop/"))
+        for next_url, expected in cases:
+            response = self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1, "next": next_url})
+            self.assertEqual(response["Location"], expected or reverse("storefront:cart"), next_url)
+            response = self.client.post(reverse("storefront:toggle_wishlist", args=[self.product.id]), {"next": next_url})
+            self.assertEqual(response["Location"], expected or self.product.get_absolute_url(), next_url)
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings
