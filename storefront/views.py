@@ -41,12 +41,6 @@ logger = logging.getLogger(__name__)
 
 @require_GET
 def health_check(request):
-    # TEMPORARY diagnostic: shows only the caller's own IP headers. Remove after reading.
-    if request.GET.get("ipdebug") == "1":
-        return JsonResponse({k: request.META.get(k) for k in (
-            "REMOTE_ADDR", "HTTP_X_FORWARDED_FOR", "HTTP_TRUE_CLIENT_IP", "HTTP_CF_CONNECTING_IP",
-            "HTTP_X_REAL_IP", "HTTP_X_ENVOY_EXTERNAL_ADDRESS", "HTTP_FORWARDED", "HTTP_CF_RAY",
-        )})
     from django.db import connection
     try:
         connection.ensure_connection()
