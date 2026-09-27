@@ -178,8 +178,14 @@ def product_detail(request, slug):
 def add_to_cart(request, product_id):
     release_expired_reservations_if_due()
     product = get_object_or_404(Product, id=product_id, is_active=True)
-    variant_id = request.POST.get("variant")
-    variant = product.variants.filter(id=variant_id).first() if variant_id else None
+    variant_id = request.POST.get("variant", "")
+    variant = product.variants.filter(id=variant_id).first() if variant_id.isdigit() else None
+    if variant_id and not variant:
+        messages.error(request, "That option is not available. Please choose another.")
+        return redirect(product.get_absolute_url())
+    if not variant and product.variants.exists():
+        messages.error(request, "Please choose a size or option before adding this to your cart.")
+        return redirect(product.get_absolute_url())
     available = variant.stock if variant else product.stock
     try:
         quantity = int(request.POST.get("quantity", 1))
@@ -334,6 +340,9 @@ def saved_for_later(request):
 @require_POST
 def move_saved_item_to_cart(request, item_id):
     item = get_object_or_404(SavedForLaterItem, id=item_id, user=request.user)
+    if not item.variant and item.product.variants.exists():
+        messages.error(request, "Please choose a size or option for this item on its product page.")
+        return redirect(item.product.get_absolute_url())
     available = item.variant.stock if item.variant else item.product.stock
     if not available:
         messages.error(request, "This item is currently out of stock.")

@@ -760,6 +760,48 @@ class ShoppingFlowTests(TestCase):
         )
         self.assertEqual(online.payment_status, "paid_manual_review")
 
+    def sized_product(self):
+        from .models import ProductVariant
+        dress = Product.objects.create(category=self.product.category, name="Wrap dress", short_description="Dress", description="Dress", price="999", stock=10)
+        small = ProductVariant.objects.create(product=dress, size="S", sku="DRESS-S", stock=3)
+        return dress, small
+
+    def test_sized_product_needs_a_size_to_be_added_to_cart(self):
+        dress, small = self.sized_product()
+        response = self.client.post(reverse("storefront:add_to_cart", args=[dress.id]), {"quantity": 1}, follow=True)
+        self.assertContains(response, "Please choose a size or option")
+        self.assertFalse(self.client.session.get("cart"))
+        self.client.post(reverse("storefront:add_to_cart", args=[dress.id]), {"quantity": 1, "variant": small.id})
+        self.assertEqual(list(self.client.session["cart"]), [f"{dress.id}:{small.id}"])
+
+    def test_invalid_or_foreign_option_is_rejected(self):
+        from .models import ProductVariant
+        dress, small = self.sized_product()
+        other = ProductVariant.objects.create(product=self.product, size="L", sku="MUG-L", stock=3)
+        for bad in ("abc", str(other.id), "999999"):
+            response = self.client.post(reverse("storefront:add_to_cart", args=[dress.id]), {"quantity": 1, "variant": bad}, follow=True)
+            self.assertContains(response, "That option is not available")
+        self.assertFalse(self.client.session.get("cart"))
+
+    def test_cart_item_missing_a_required_size_is_removed_before_checkout(self):
+        dress, small = self.sized_product()
+        self.login_customer()
+        session = self.client.session
+        session["cart"] = {f"{dress.id}:0": {"product_id": dress.id, "variant_id": None, "quantity": 1}}
+        session.save()
+        response = self.client.get(reverse("storefront:checkout"), follow=True)
+        self.assertContains(response, "no longer available and was removed")
+        self.assertFalse(Order.objects.exists())
+
+    def test_saved_item_without_size_cannot_move_to_cart(self):
+        dress, small = self.sized_product()
+        user = self.login_customer()
+        saved = SavedForLaterItem.objects.create(user=user, product=dress, quantity=1)
+        response = self.client.post(reverse("storefront:move_saved_item_to_cart", args=[saved.id]))
+        self.assertRedirects(response, dress.get_absolute_url(), fetch_redirect_response=False)
+        self.assertTrue(SavedForLaterItem.objects.filter(pk=saved.pk).exists())
+        self.assertFalse(self.client.session.get("cart"))
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings
