@@ -18,7 +18,7 @@ from django.core.cache import cache
 from django.core.mail import send_mail
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import Avg, Count, DecimalField, ExpressionWrapper, F, Q, Sum
+from django.db.models import Avg, Count, DecimalField, ExpressionWrapper, F, Prefetch, Q, Sum
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -103,6 +103,14 @@ class IKartPasswordResetView(auth_views.PasswordResetView):
         return redirect(self.get_success_url())
 
 
+def _card_products(queryset):
+    """Everything _product_card.html shows (image, approved-review count and rating) in fixed queries."""
+    approved = Q(reviews__is_approved=True)
+    return queryset.prefetch_related("images").annotate(
+        rating_value=Avg("reviews__rating", filter=approved), review_count=Count("reviews", filter=approved),
+    )
+
+
 def home(request):
     from storefront.models import HeroSection
     hero = HeroSection.objects.filter(is_active=True).first()
@@ -111,15 +119,13 @@ def home(request):
         hero, _ = HeroSection.objects.get_or_create(pk=1)
     return render(request, "storefront/home.html", {
         "hero": hero,
-        "featured": Product.objects.filter(is_active=True, is_featured=True)[:8],
+        "featured": _card_products(Product.objects.filter(is_active=True, is_featured=True))[:8],
         "categories": Category.objects.filter(parent__isnull=True)[:8],
     })
 
 
 def product_list(request, category_slug=None):
-    products = Product.objects.filter(is_active=True).select_related("category").prefetch_related("images").annotate(
-        rating_value=Avg("reviews__rating", filter=Q(reviews__is_approved=True)), review_count=Count("reviews", filter=Q(reviews__is_approved=True)),
-    )
+    products = _card_products(Product.objects.filter(is_active=True).select_related("category"))
     category = None
     if category_slug:
         category = get_object_or_404(Category, slug=category_slug)
@@ -311,7 +317,7 @@ def remove_from_cart(request, key):
 
 @login_required
 def wishlist(request):
-    items = request.user.wishlist_items.select_related("product").prefetch_related("product__images")
+    items = request.user.wishlist_items.prefetch_related(Prefetch("product", queryset=_card_products(Product.objects.all())))
     return render(request, "storefront/wishlist.html", {"items": items})
 
 

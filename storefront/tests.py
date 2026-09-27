@@ -903,6 +903,41 @@ class ShoppingFlowTests(TestCase):
         self.assertEqual(response["Location"], "https://rzp.io/i/plink_once")
         self.assertEqual(Order.objects.count(), 1)
 
+    def add_card_products(self, count, reviewer):
+        for i in range(count):
+            product = Product.objects.create(
+                category=self.product.category, name=f"Card item {Product.objects.count()}", short_description="x",
+                description="x", price="100", stock=5, is_featured=True,
+            )
+            Review.objects.create(product=product, user=reviewer, rating=4, title="ok", body="ok")
+            WishlistItem.objects.create(user=reviewer, product=product)
+
+    def card_page_queries(self, url):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        with CaptureQueriesContext(connection) as queries:
+            self.assertEqual(self.client.get(url).status_code, 200)
+        return len(queries)
+
+    def test_product_card_pages_use_a_fixed_number_of_queries(self):
+        user = self.login_customer()
+        self.add_card_products(2, user)
+        for url in ("/", "/shop/", "/wishlist/"):
+            self.client.get(url)  # first home visit creates the default hero banner
+        before = {url: self.card_page_queries(url) for url in ("/", "/shop/", "/wishlist/")}
+        self.add_card_products(5, user)
+        after = {url: self.card_page_queries(url) for url in ("/", "/shop/", "/wishlist/")}
+        self.assertEqual(before, after)
+
+    def test_product_card_counts_only_approved_reviews(self):
+        user = self.login_customer()
+        other = User.objects.create_user("other", "other@example.com", "Secur3Password!")
+        Review.objects.create(product=self.product, user=user, rating=5, title="ok", body="ok")
+        Review.objects.create(product=self.product, user=other, rating=1, title="spam", body="spam", is_approved=False)
+        page = self.client.get(reverse("storefront:product_list")).content.decode()
+        self.assertIn("out of 5, 1 review<", page)
+        self.assertNotIn("2 reviews", page)
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings
