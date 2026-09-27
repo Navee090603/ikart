@@ -7,6 +7,9 @@ from abc import ABC, abstractmethod
 from typing import Optional
 import anthropic
 import requests
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class AIProvider(ABC):
@@ -115,6 +118,10 @@ class GroqProvider(AIProvider):
 
     def get_response(self, message: str, session_id: str, context: Optional[dict] = None) -> str:
         """Get response from Groq API."""
+        if not self.api_key:
+            logger.error("Groq API key not configured")
+            return "Groq API key is not configured. Please contact support."
+
         system_prompt = self._build_system_prompt(context)
 
         try:
@@ -140,16 +147,24 @@ class GroqProvider(AIProvider):
                 data = response.json()
                 return data["choices"][0]["message"]["content"]
             elif response.status_code == 401:
+                logger.error(f"Groq authentication failed: {response.text}")
                 return "Authentication failed. Please check your API key."
             elif response.status_code == 429:
+                logger.warning("Groq rate limit exceeded")
                 return "I'm experiencing high demand. Please try again in a moment!"
             else:
-                return "I'm temporarily unavailable. Our support team is here to help: /support/"
+                logger.error(f"Groq API error {response.status_code}: {response.text}")
+                return f"API error {response.status_code}. Our support team is here to help: /support/"
 
         except requests.exceptions.Timeout:
+            logger.error("Groq API request timed out")
             return "Request timed out. Please try again."
         except requests.exceptions.RequestException as e:
-            return "I'm having trouble connecting. Please try again or contact support."
+            logger.exception(f"Groq API request failed: {str(e)}")
+            return f"Connection error: {str(e)}"
+        except Exception as e:
+            logger.exception(f"Groq provider error: {str(e)}")
+            return f"Error: {str(e)}"
 
     def _build_system_prompt(self, context: Optional[dict] = None) -> str:
         """Build Lux system prompt with optional user context."""
