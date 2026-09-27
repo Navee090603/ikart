@@ -26,6 +26,9 @@ SITE_URL = env(
     default="http://127.0.0.1:8000" if DEBUG else None,
 )
 
+# Render sets RENDER=true; its Cloudflare edge supplies an unspoofable True-Client-IP.
+TRUST_TRUE_CLIENT_IP = env.bool("TRUST_TRUE_CLIENT_IP", default=env.bool("RENDER", default=False))
+
 CSRF_TRUSTED_ORIGINS = env.list(
     "CSRF_TRUSTED_ORIGINS",
     default=[],
