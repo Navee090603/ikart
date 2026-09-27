@@ -1103,6 +1103,12 @@ class ShoppingFlowTests(TestCase):
         with self.settings(AI_PROVIDER="claude", CLAUDE_API_KEY="test", CLAUDE_MODEL="claude-test-model"):
             self.assertEqual(lux_module.get_lux().provider.model, "claude-test-model")
 
+    def test_privacy_policy_explains_lux_ai_processing(self):
+        page = self.client.get(reverse("storefront:trust_page", args=["privacy"])).content.decode()
+        self.assertIn("Lux", page)
+        self.assertIn("Groq", page)
+        self.assertIn("never sent", page)
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings
