@@ -1212,8 +1212,17 @@ def chat_message(request):
             user_context = {"username": request.user.get_full_name() or request.user.username}
 
         # Get Lux's response
-        lux = get_lux()
-        response = lux.chat(message, session_id, user_context)
+        try:
+            lux = get_lux()
+            response = lux.chat(message, session_id, user_context)
+        except Exception as e:
+            error_msg = f"Lux initialization error: {str(e)}"
+            logger.exception(error_msg)
+            return JsonResponse({
+                'reply': f"[System Error] {error_msg}",
+                'session_id': session_id,
+                'error': error_msg
+            })
 
         return JsonResponse({
             'reply': response,
@@ -1225,4 +1234,7 @@ def chat_message(request):
         return JsonResponse({'error': 'Invalid JSON in request body'}, status=400)
     except Exception as e:
         logger.exception(f"Lux chat error: {str(e)}")
-        return JsonResponse({'error': 'An error occurred. Please try again.'}, status=500)
+        return JsonResponse({
+            'reply': f"[Error] {str(e)}",
+            'error': str(e)
+        }, status=500)

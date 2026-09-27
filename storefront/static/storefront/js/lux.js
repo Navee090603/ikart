@@ -137,23 +137,28 @@ class LuxChatbot {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('HTTP ' + response.status);
-      }
-
       const data = await response.json();
       this.removeTypingIndicator();
 
-      if (data.error) {
-        this.addMessage('bot', 'Oops! Something went wrong. Try again?');
-      } else {
+      if (!response.ok) {
+        const errorMsg = data.error || data.reply || 'HTTP ' + response.status;
+        console.error('Lux HTTP error:', errorMsg);
+        this.addMessage('bot', 'Error: ' + errorMsg);
+      } else if (data.error) {
+        console.error('Lux API error:', data.error);
+        this.addMessage('bot', 'Error: ' + data.error);
+      } else if (data.reply) {
         this.addMessage('bot', data.reply);
-        this.updateSessionId(data.session_id);
+        if (data.session_id) {
+          this.updateSessionId(data.session_id);
+        }
+      } else {
+        this.addMessage('bot', 'No response received');
       }
     } catch (error) {
-      console.error('Lux error:', error);
+      console.error('Lux fetch error:', error);
       this.removeTypingIndicator();
-      this.addMessage('bot', 'I am having trouble connecting. Please try again or contact support.');
+      this.addMessage('bot', 'Network error: ' + error.message);
     } finally {
       this.isLoading = false;
       document.getElementById('lux-input').focus();
