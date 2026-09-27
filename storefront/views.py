@@ -1226,9 +1226,9 @@ def chat_message(request):
     if not message:
         return JsonResponse({'error': 'Message cannot be empty'}, status=400)
 
-    user_context = {}
+    user_context = {"user": request.user}
     if request.user.is_authenticated:
-        user_context = {"username": request.user.get_full_name() or request.user.username}
+        user_context["username"] = request.user.get_full_name() or request.user.username
 
     try:
         reply = get_lux().chat(message, session_id, user_context)

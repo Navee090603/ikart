@@ -802,6 +802,55 @@ class ShoppingFlowTests(TestCase):
         self.assertTrue(SavedForLaterItem.objects.filter(pk=saved.pk).exists())
         self.assertFalse(self.client.session.get("cart"))
 
+    def test_lux_sees_matching_products_with_real_prices_sizes_and_links(self):
+        from .services.lux_context import relevant_products
+        dress, small = self.sized_product()
+        Product.objects.create(category=self.product.category, name="Silk dress", short_description="Silk", description="Silk", price="3000", stock=1)
+        block = relevant_products("Suggest a dress under 1500")
+        self.assertIn("Wrap dress | ₹999", block)
+        self.assertIn("sizes in stock: S", block)
+        self.assertIn(dress.get_absolute_url(), block)
+        self.assertNotIn("Silk dress", block)
+        self.assertNotIn("Coffee mug", block)
+        self.assertIsNone(relevant_products("What is your return policy?"))
+        self.assertIn("Wrap dress", relevant_products("ஒரு உடை வேண்டும்"))
+        self.assertEqual(relevant_products("dresses above 50000"), "No matching products are priced at least ₹50000.")
+
+    def test_lux_sees_only_the_signed_in_customers_orders(self):
+        from django.contrib.auth.models import AnonymousUser
+        from .services.lux_context import customer_orders
+        user = self.login_customer()
+        other = User.objects.create_user("other", "other@example.com", "Secur3Password!")
+        base = dict(full_name="C", phone="9999999999", address_line1="1 Main", city="Pune", state="Maharashtra",
+                    postal_code="411001", payment_method="cod", subtotal="299", total="299")
+        mine = Order.objects.create(user=user, email=user.email, status=Order.Status.SHIPPED, **base)
+        theirs = Order.objects.create(user=other, email=other.email, **base)
+        block = customer_orders(user, f"where are {mine.number} and {theirs.number}?")
+        self.assertIn(f"{mine.number} | placed", block)
+        self.assertIn("status: Shipped", block)
+        self.assertIn(f"/order/{mine.number}/", block)
+        self.assertNotIn(f"{theirs.number} | placed", block)
+        self.assertIn(f"Not found in this customer's account: {theirs.number}", block)
+        self.assertIn("not signed in", customer_orders(AnonymousUser(), "track my order"))
+        self.assertIsNone(customer_orders(user, "suggest a dress"))
+
+    @patch("storefront.services.lux.get_ai_provider")
+    def test_chat_endpoint_gives_lux_the_customers_orders(self, get_provider):
+        from .services import lux as lux_module
+        lux_module._lux_instance = None
+        self.addCleanup(setattr, lux_module, "_lux_instance", None)
+        provider = get_provider.return_value
+        provider.get_response.return_value = "It's on the way."
+        user = self.login_customer()
+        order = Order.objects.create(user=user, email=user.email, full_name="C", phone="9999999999", address_line1="1 Main",
+                                     city="Pune", state="Maharashtra", postal_code="411001", payment_method="cod",
+                                     subtotal="299", total="299")
+        with self.settings(AI_PROVIDER="groq", GROQ_API_KEY="test"):
+            response = self.client.post(reverse("storefront:chat_message"), data=json.dumps({"message": "where is my order?"}), content_type="application/json")
+        self.assertEqual(response.json()["reply"], "It's on the way.")
+        system_prompt = provider.get_response.call_args[0][0]
+        self.assertIn(order.number, system_prompt)
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings

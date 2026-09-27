@@ -7,6 +7,7 @@ import logging
 from typing import Optional
 from django.conf import settings
 from .ai_providers import get_ai_provider
+from .lux_context import customer_orders, relevant_products
 from .lux_prompt import build_system_prompt
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,11 @@ class LuxChatbot:
 
         # Get response from configured provider
         try:
-            response = self.provider.get_response(build_system_prompt(context), message)
+            user = (context or {}).get("user")
+            prompt = build_system_prompt(
+                context, products=relevant_products(message), orders=customer_orders(user, message),
+            )
+            response = self.provider.get_response(prompt, message)
             return response or "I'm thinking... Let me connect you with our support team instead."
         except Exception:
             # Graceful fallback for any provider errors

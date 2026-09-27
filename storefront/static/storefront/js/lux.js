@@ -164,7 +164,8 @@ class LuxChatbot {
     const className = role === 'user' ? 'lux-message-user' : 'lux-message-bot';
 
     message.className = 'lux-message ' + className;
-    message.innerHTML = '<div class="lux-message-content">' + this.escapeHtml(text) + '</div>';
+    const safeText = this.escapeHtml(text);
+    message.innerHTML = '<div class="lux-message-content">' + (role === 'bot' ? this.linkifySitePaths(safeText) : safeText) + '</div>';
 
     messagesContainer.appendChild(message);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -192,6 +193,14 @@ class LuxChatbot {
   updateSessionId(newId) {
     this.sessionId = newId;
     sessionStorage.setItem('lux_session_id', newId);
+  }
+
+  // Runs on already-escaped text and only matches IKart paths, so replies can't link off-site.
+  linkifySitePaths(html) {
+    return html.replace(
+      /(^|[\s(])(\/(?:product|category|shop|order|orders|returns|support|wishlist|cart|account)\/[A-Za-z0-9\-\/]*)/g,
+      '$1<a class="lux-link" href="$2">$2</a>'
+    );
   }
 
   escapeHtml(text) {

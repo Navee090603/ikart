@@ -215,6 +215,15 @@
   background: var(--lux-border);
   color: var(--lux-text);
   border-bottom-left-radius: 4px;
+  white-space: pre-line;
+}
+
+.lux-link {
+  color: var(--lux-brand);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
 }
 
 /* Typing indicator */
