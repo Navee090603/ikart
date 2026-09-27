@@ -10,7 +10,7 @@ FAQ_CACHE_KEY = "lux:faq_block"
 STORE_FACTS = """\
 - Store: IKart, an Indian online fashion store (clothing, dresses, shoes). Prices are in rupees (₹).
 - Returns: within 7 days of delivery. Items must be unused/unworn, unwashed, with original tags and packaging. \
-To start one: Order History (/orders/) → open the order → "Request return" (shown once the order is delivered). \
+To start one: Order History (/orders/) → open the order → "Request return" (shown for 7 days after delivery). \
 There are no exchanges; customers return the item and place a new order. \
 Refunds go to the original payment method after the returned item passes inspection. There is no fixed refund timeline to promise.
 - Damaged or wrong item: apologise and ask the customer to contact support (/support/) with their order number.

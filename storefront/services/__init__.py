@@ -1,8 +1,10 @@
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import logging
 
 from django.conf import settings
+from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, When
@@ -205,23 +207,93 @@ def fail_or_cancel_payment(payment, status, payload=None):
         return order
 
 
-def release_stale_payment_reservations(cutoff):
-    """Release old uncompleted Razorpay reservations; safe to run repeatedly."""
-    payment_ids = list(
-        PaymentTransaction.objects.filter(
-            status__in=[PaymentTransaction.Status.CREATED, PaymentTransaction.Status.AUTHORIZED],
-            created_at__lt=cutoff,
-        ).values_list("id", flat=True)
-    )
+def razorpay_client():
+    if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
+        return None
+    return razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+
+
+def _provider_payment_state(client, payment):
+    """Ask Razorpay what happened to an unfinished attempt.
+
+    Returns ("paid", payment_entity), ("unpaid", None) once it can no longer be
+    paid, or ("unknown", None) when it may still be paid or cannot be checked.
+    """
+    link_id = payment.provider_payment_link_id or payment.provider_payload.get("payment_link_id")
+    if link_id:
+        link = client.payment_link.fetch(link_id)
+        status = link.get("status")
+        if status == "paid":
+            captured = [p for p in link.get("payments") or [] if p.get("status") == "captured"]
+            return ("paid", client.payment.fetch(captured[0]["payment_id"])) if captured else ("unknown", None)
+        if status in {"expired", "cancelled"}:
+            return "unpaid", None
+        if status == "created":
+            # Past its expiry but not yet flipped by Razorpay: cancel it so it can't be paid later.
+            client.payment_link.cancel(link_id)
+            return "unpaid", None
+        return "unknown", None
+    if payment.provider_order_id:
+        # Legacy checkout.js orders: that flow is gone, so an order with no successful
+        # payment can no longer be completed from the site.
+        attempts = client.order.payments(payment.provider_order_id).get("items", [])
+        captured = [p for p in attempts if p.get("status") == "captured"]
+        if captured:
+            return "paid", captured[0]
+        if any(p.get("status") == "authorized" for p in attempts):
+            return "unknown", None
+        return "unpaid", None
+    return "unpaid", None
+
+
+def release_stale_payment_reservations(cutoff, client=None):
+    """Settle online-payment attempts older than `cutoff` that never completed.
+
+    Checks Razorpay first: paid attempts are confirmed instead of cancelled, and
+    anything still payable or unreachable is left alone. Safe to run repeatedly.
+    Returns the number of reservations released.
+    """
+    payments = PaymentTransaction.objects.filter(
+        status=PaymentTransaction.Status.CREATED, created_at__lt=cutoff,
+    ).select_related("order")
     released = 0
-    for payment_id in payment_ids:
-        payment = PaymentTransaction.objects.filter(pk=payment_id).first()
-        if not payment:
-            continue
+    for payment in payments:
+        if client:
+            try:
+                state, provider_payment = _provider_payment_state(client, payment)
+            except Exception:
+                logging.getLogger(__name__).exception("Could not check Razorpay for order %s", payment.order.number)
+                continue
+            if state == "unknown":
+                continue
+            if state == "paid":
+                if int(provider_payment.get("amount", 0)) == int(payment.amount * 100):
+                    order = mark_payment_captured(payment, provider_payment["id"], provider_payment)
+                    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", f"Your payment was successful. Total paid: ₹{order.total}")
+                continue
         order = fail_or_cancel_payment(payment, PaymentTransaction.Status.CANCELLED, {"reason": "payment_reservation_expired"})
         if order.payment_status == "cancelled":
             released += 1
     return released
+
+
+RESERVATION_SWEEP_KEY = "payments:reservation_sweep"
+
+
+def release_expired_reservations_if_due():
+    """Run the reservation sweep at most every 5 minutes per process.
+
+    Render's free plan has no scheduler, so shopping pages trigger this instead.
+    """
+    if not cache.add(RESERVATION_SWEEP_KEY, True, timeout=300):
+        return
+    cutoff = timezone.now() - timedelta(minutes=settings.PAYMENT_RESERVATION_MINUTES + 5)
+    if not PaymentTransaction.objects.filter(status=PaymentTransaction.Status.CREATED, created_at__lt=cutoff).exists():
+        return
+    try:
+        release_stale_payment_reservations(cutoff, razorpay_client())
+    except Exception:
+        logging.getLogger(__name__).exception("Reservation sweep failed")
 
 
 def refund_captured_payment(order):

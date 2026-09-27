@@ -162,11 +162,11 @@ class ShoppingFlowTests(TestCase):
         response = self.client.post(reverse("storefront:update_cart_quote"), {"key": cart_key, "quantity": 1})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["discount_amount"], "29.90")
-        self.assertEqual(response.json()["total"], "318.10")
+        self.assertEqual(response.json()["total"], "269.10")
         response = self.client.post(reverse("storefront:checkout"), self.checkout_data(coupon_code=coupon.code))
         order = Order.objects.get()
         self.assertRedirects(response, reverse("storefront:order_confirmation", args=[order.number]))
-        self.assertEqual(order.total, Decimal("318.10"))
+        self.assertEqual(order.total, Decimal("269.10"))
 
     def test_checkout_page_loads(self):
         self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
@@ -180,7 +180,7 @@ class ShoppingFlowTests(TestCase):
     def test_verified_online_payment_is_captured_once_and_clears_cart(self, client_class):
         fake_client = client_class.return_value
         fake_client.payment_link.create.return_value = self.payment_link_response()
-        fake_client.payment.fetch.return_value = {"id": "pay_test_123", "order_id": "order_test_123", "amount": 34800, "currency": "INR", "status": "captured"}
+        fake_client.payment.fetch.return_value = {"id": "pay_test_123", "order_id": "order_test_123", "amount": 29900, "currency": "INR", "status": "captured"}
         self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
         response = self.client.post(reverse("storefront:checkout"), self.checkout_data(payment_method="razorpay"))
         order = Order.objects.get()
@@ -497,23 +497,146 @@ class ShoppingFlowTests(TestCase):
         self.assertEqual(payment.provider_refund_id, "rfnd_new_1")
         self.assertEqual(result.pk, payment.pk)
 
-    def test_stale_payment_reservation_command_releases_stock(self):
+    def stale_online_order(self, **payment_fields):
         order = Order.objects.create(
             email="buyer@example.com", full_name="Buyer", phone="9999999999", address_line1="1 Main",
             city="Pune", state="Maharashtra", postal_code="411001", payment_method="razorpay",
-            subtotal="299", delivery_fee="49", total="348", status=Order.Status.PAYMENT_PENDING,
+            subtotal="299", total="299", status=Order.Status.PAYMENT_PENDING,
             payment_status="initiated", inventory_deducted=True,
         )
         OrderItem.objects.create(order=order, product=self.product, product_name=self.product.name, quantity=1, unit_price="299")
         self.product.stock = 4
         self.product.save(update_fields=["stock"])
-        payment = PaymentTransaction.objects.create(order=order, provider_order_id="order_stale_123", amount="348")
-        PaymentTransaction.objects.filter(pk=payment.pk).update(created_at=timezone.now() - timedelta(minutes=31))
+        payment = PaymentTransaction.objects.create(order=order, amount="299", **payment_fields)
+        PaymentTransaction.objects.filter(pk=payment.pk).update(created_at=timezone.now() - timedelta(minutes=40))
+        return order
+
+    @override_settings(RAZORPAY_KEY_ID="", RAZORPAY_KEY_SECRET="")
+    def test_stale_reservation_released_when_razorpay_not_configured(self):
+        order = self.stale_online_order(provider_order_id="order_stale_123")
         call_command("release_stale_payment_reservations", minutes=30)
         order.refresh_from_db()
         self.product.refresh_from_db()
         self.assertEqual(order.status, Order.Status.PAYMENT_FAILED)
         self.assertEqual(self.product.stock, 5)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret")
+    @patch("storefront.services.razorpay.Client")
+    def test_expired_payment_link_releases_stock(self, client_class):
+        client_class.return_value.payment_link.fetch.return_value = {"status": "expired", "payments": None}
+        order = self.stale_online_order(provider_payment_link_id="plink_old")
+        call_command("release_stale_payment_reservations", minutes=30)
+        order.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PAYMENT_FAILED)
+        self.assertEqual(self.product.stock, 5)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret")
+    @patch("storefront.services.razorpay.Client")
+    def test_unexpired_payment_link_is_cancelled_before_release(self, client_class):
+        client_class.return_value.payment_link.fetch.return_value = {"status": "created", "payments": None}
+        order = self.stale_online_order(provider_payment_link_id="plink_open")
+        call_command("release_stale_payment_reservations", minutes=30)
+        client_class.return_value.payment_link.cancel.assert_called_once_with("plink_open")
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PAYMENT_FAILED)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret")
+    @patch("storefront.services.razorpay.Client")
+    def test_paid_link_found_by_sweep_confirms_order_instead_of_cancelling(self, client_class):
+        fake = client_class.return_value
+        fake.payment_link.fetch.return_value = {"status": "paid", "payments": [{"payment_id": "pay_late", "status": "captured"}]}
+        fake.payment.fetch.return_value = {"id": "pay_late", "amount": 29900, "currency": "INR", "status": "captured"}
+        order = self.stale_online_order(provider_payment_link_id="plink_paid")
+        call_command("release_stale_payment_reservations", minutes=30)
+        order.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PLACED)
+        self.assertEqual(order.payment_status, "paid")
+        self.assertEqual(self.product.stock, 4)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret")
+    @patch("storefront.services.razorpay.Client")
+    def test_sweep_leaves_order_alone_when_razorpay_unreachable(self, client_class):
+        client_class.return_value.payment_link.fetch.side_effect = ConnectionError("down")
+        order = self.stale_online_order(provider_payment_link_id="plink_unknown")
+        call_command("release_stale_payment_reservations", minutes=30)
+        order.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PAYMENT_PENDING)
+        self.assertEqual(self.product.stock, 4)
+
+    @override_settings(RAZORPAY_KEY_ID="", RAZORPAY_KEY_SECRET="")
+    def test_shopping_pages_trigger_the_sweep(self):
+        order = self.stale_online_order(provider_order_id="order_stale_456")
+        self.client.get(reverse("storefront:cart"))
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PAYMENT_FAILED)
+
+    def delivered_order(self, user, days_ago):
+        order = Order.objects.create(
+            user=user, email=user.email, full_name="Customer", phone="9999999999", address_line1="1 Main",
+            city="Pune", state="Maharashtra", postal_code="411001", payment_method="cod",
+            subtotal="299", total="299", status=Order.Status.DELIVERED,
+        )
+        Order.objects.filter(pk=order.pk).update(delivered_at=timezone.now() - timedelta(days=days_ago))
+        order.refresh_from_db()
+        return order
+
+    def test_marking_delivered_records_delivery_time_once(self):
+        order = Order.objects.create(
+            email="b@example.com", full_name="B", phone="9999999999", address_line1="1 Main", city="Pune",
+            state="Maharashtra", postal_code="411001", payment_method="cod", subtotal="299", total="299",
+        )
+        self.assertIsNone(order.delivered_at)
+        order.status = Order.Status.DELIVERED
+        order.save(update_fields=["status", "updated_at"])
+        order.refresh_from_db()
+        first = order.delivered_at
+        self.assertIsNotNone(first)
+        order.save()
+        order.refresh_from_db()
+        self.assertEqual(order.delivered_at, first)
+
+    def test_return_allowed_within_seven_days_of_delivery(self):
+        user = self.login_customer()
+        order = self.delivered_order(user, days_ago=6)
+        self.assertTrue(order.can_request_return)
+        self.assertContains(self.client.get(reverse("storefront:order_confirmation", args=[order.number])), "Request return")
+        response = self.client.post(reverse("storefront:request_order_change", args=[order.number, "return"]), {"reason": "changed_mind", "note": ""})
+        self.assertEqual(response.status_code, 302)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.RETURN_REQUESTED)
+
+    def test_return_blocked_after_seven_days(self):
+        user = self.login_customer()
+        order = self.delivered_order(user, days_ago=8)
+        self.assertFalse(order.can_request_return)
+        self.assertNotContains(self.client.get(reverse("storefront:order_confirmation", args=[order.number])), "Request return</a>")
+        response = self.client.post(reverse("storefront:request_order_change", args=[order.number, "return"]), {"reason": "changed_mind", "note": ""}, follow=True)
+        self.assertContains(response, "return window for this order closed")
+        self.assertFalse(OrderRequest.objects.filter(order=order).exists())
+
+    def test_rejecting_requests_restores_previous_order_status(self):
+        from django.contrib import admin as django_admin
+        from django.test import RequestFactory
+        from .admin import OrderRequestAdmin
+        user = self.login_customer()
+        model_admin = OrderRequestAdmin(OrderRequest, django_admin.site)
+        http_request = RequestFactory().post("/")
+        cases = [
+            (Order.Status.CANCELLATION_REQUESTED, "cancellation", Order.Status.PLACED),
+            (Order.Status.RETURN_REQUESTED, "return", Order.Status.DELIVERED),
+        ]
+        for order_status, request_type, expected in cases:
+            order = self.delivered_order(user, days_ago=2)
+            Order.objects.filter(pk=order.pk).update(status=order_status)
+            order.refresh_from_db()
+            change = OrderRequest.objects.create(order=order, user=user, request_type=request_type, reason="changed_mind")
+            change.status = OrderRequest.Status.REJECTED
+            model_admin.save_model(http_request, change, None, True)
+            order.refresh_from_db()
+            self.assertEqual(order.status, expected)
 
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""

@@ -700,6 +700,16 @@ class OrderRequestAdmin(admin.ModelAdmin):
             order.save(update_fields=["status", "payment_status", "updated_at"])
             notify_order_email(order, "refund_pending", f"Order {order.number}: refund initiated", "Your refund has been initiated and is awaiting confirmation from the payment provider.")
             return
+        elif obj.status == OrderRequest.Status.REJECTED and previous_status != obj.status:
+            restored_status = {
+                (OrderRequest.RequestType.CANCELLATION, Order.Status.CANCELLATION_REQUESTED): Order.Status.PLACED,
+                (OrderRequest.RequestType.RETURN, Order.Status.RETURN_REQUESTED): Order.Status.DELIVERED,
+            }.get((obj.request_type, order.status))
+            if restored_status:
+                order.status = restored_status
+                order.save(update_fields=["status", "updated_at"])
+            notify_order_email(order, "request_updated", f"Order {order.number}: {obj.get_status_display()}", f"Your {obj.get_request_type_display().lower()} request was not approved. Please contact support if you have questions.")
+            return
         else:
             return
         restore_order_inventory(order)
