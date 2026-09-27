@@ -19,7 +19,7 @@ from .forms import CategoryCSVUploadForm
 from django.core.mail import send_mail
 
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, HeroSection, MarketingPreference, NotificationLog, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductImage, ProductQuestion, ProductVariant, Review, SavedForLaterItem, Shipment, ShipmentEvent, SupportTicket, SupportTicketReply, UserProfile, WishlistItem
-from .services import fail_or_cancel_payment, notify_order_email, refund_captured_payment, restore_order_inventory
+from .services import fail_or_cancel_payment, notify_order_email, refund_captured_payment, release_coupon_redemption, restore_order_inventory
 
 logger = logging.getLogger(__name__)
 
@@ -599,11 +599,45 @@ class OrderAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         previous_status = Order.objects.get(pk=obj.pk).status if change else None
+        status_changed = change and previous_status != obj.status
+        closing = obj.status in {Order.Status.CANCELLED, Order.Status.REFUNDED}
+        if status_changed and closing and not self._refund_before_closing(request, obj):
+            obj.status = previous_status
+            status_changed = False
         super().save_model(request, obj, form, change)
-        if change and obj.status in {Order.Status.CANCELLED, Order.Status.REFUNDED} and previous_status != obj.status:
+        if status_changed and closing:
             restore_order_inventory(obj)
-        if change and previous_status != obj.status:
+        if status_changed and obj.status == Order.Status.CANCELLED:
+            release_coupon_redemption(obj)
+        if status_changed:
             notify_order_email(obj, "order_status", f"Order {obj.number} is {obj.get_status_display()}", f"Your order status is now: {obj.get_status_display()}.")
+
+    def _refund_before_closing(self, request, order):
+        """Refund a captured online payment before an order is cancelled or refunded.
+
+        Returns False (keep the old status) if the refund could not be started.
+        """
+        if order.payment_method != Order.PaymentMethod.RAZORPAY:
+            if order.status == Order.Status.CANCELLED and order.payment_status == "pending":
+                order.payment_status = "cancelled"
+            return True
+        payment = PaymentTransaction.objects.filter(order=order).first()
+        if not payment or payment.status != PaymentTransaction.Status.CAPTURED:
+            return True
+        try:
+            payment = refund_captured_payment(order)
+        except Exception as error:
+            logger.exception("Razorpay refund failed to start for order %s", order.number)
+            reason = str(error) if isinstance(error, ValueError) else "Razorpay did not accept the refund"
+            self.message_user(request, f"Status not changed: {reason}. The customer has not been refunded; try again shortly.", messages.ERROR)
+            return False
+        if payment.status == PaymentTransaction.Status.REFUND_PENDING:
+            order.payment_status = "refund_pending"
+            self.message_user(request, f"Refund of ₹{payment.amount} started with Razorpay. It will show as refunded once Razorpay confirms it.", messages.INFO)
+        else:
+            order.payment_status = "refunded"
+            self.message_user(request, f"₹{payment.amount} refunded to the customer through Razorpay.", messages.INFO)
+        return True
 
 
 class ShipmentEventInline(admin.TabularInline):
@@ -696,6 +730,7 @@ class OrderRequestAdmin(admin.ModelAdmin):
             if obj.request_type == OrderRequest.RequestType.CANCELLATION:
                 order.status = Order.Status.CANCELLED
                 restore_order_inventory(order)
+                release_coupon_redemption(order)
             order.payment_status = "refund_pending"
             order.save(update_fields=["status", "payment_status", "updated_at"])
             notify_order_email(order, "refund_pending", f"Order {order.number}: refund initiated", "Your refund has been initiated and is awaiting confirmation from the payment provider.")
@@ -713,6 +748,8 @@ class OrderRequestAdmin(admin.ModelAdmin):
         else:
             return
         restore_order_inventory(order)
+        if order.status == Order.Status.CANCELLED:
+            release_coupon_redemption(order)
         order.save(update_fields=["status", "payment_status", "updated_at"])
         notify_order_email(order, "request_updated", f"Order {order.number}: {obj.get_status_display()}", f"Your {obj.get_request_type_display().lower()} request is now {obj.get_status_display().lower()}.")
 

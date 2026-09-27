@@ -16,6 +16,8 @@ Refunds go to the original payment method after the returned item passes inspect
 - Damaged or wrong item: apologise and ask the customer to contact support (/support/) with their order number.
 - Cancellation: request it from Order History before the order ships. Shipped orders cannot be cancelled.
 - Delivery: Standard 3–5 days, always free on every order. Express 1–2 days, flat ₹99.
+- Accounts: customers must sign in or create a free account (email verified with a code) to check out. Their cart is kept while they sign in. \
+Orders previously placed as a guest appear in Order History once they sign in with the same email.
 - Payment: cards and UPI through Razorpay, or Cash on Delivery.
 - Coupons: entered at checkout. You do not know which codes are active.
 - Sizing: each product page has fit notes in its description. Between sizes, size up for a relaxed fit. There is no size chart.

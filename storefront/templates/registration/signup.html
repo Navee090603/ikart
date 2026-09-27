@@ -38,5 +38,5 @@
       </div>
       <button type="submit" class="ik-btn ik-btn-primary ik-btn-lg ik-btn-block">Create account</button>
     </form>
-    <p class="ik-auth-alt">Already have an account? <a class="ik-link" href="{% url 'login' %}">Sign in</a></p>
+    <p class="ik-auth-alt">Already have an account? <a class="ik-link" href="{% url 'login' %}{% if next %}?next={{ next|urlencode }}{% endif %}">Sign in</a></p>
 {% endblock %}

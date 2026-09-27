@@ -34,6 +34,7 @@ from .ratelimit import rate_limit
 from .services import build_order_tracking_steps, calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, release_expired_reservations_if_due, restore_order_inventory, verified_purchaser_ids
 from .services.lux import get_lux
 from django.contrib.auth import views as auth_views
+from django.contrib.auth.views import redirect_to_login
 
 logger = logging.getLogger(__name__)
 
@@ -460,19 +461,11 @@ def _create_order_from_cart(form, cart, quote, checkout_token, payment_pending=F
         return order
 
 
-@require_GET
-@rate_limit("check_email_registered", limit=20, period_seconds=300)
-def check_email_registered(request):
-    """Lets checkout warn a guest who types an email that already has an
-    account: otherwise their order is created with user=None and never
-    shows up in that account's order history."""
-    email = request.GET.get("email", "").strip().lower()
-    registered = bool(email) and User.objects.filter(email__iexact=email).exists()
-    return JsonResponse({"registered": registered})
-
-
 @rate_limit("checkout", limit=30, period_seconds=300)
 def checkout(request):
+    if not request.user.is_authenticated:
+        messages.info(request, "Please sign in or create an account to check out. Your cart is saved.")
+        return redirect_to_login(request.get_full_path())
     release_expired_reservations_if_due()
     cart = Cart(request)
     removed_count = cart.prune_stale()
@@ -990,11 +983,19 @@ def signup(request):
                 "expires_at": expires_at.isoformat(),
                 "attempts": 0,
                 "last_sent_at": timezone.now().isoformat(),
+                "next": _safe_next(request),
             }
             return redirect("storefront:verify_email")
     else:
         form = SignUpForm()
-    return render(request, "registration/signup.html", {"form": form})
+    return render(request, "registration/signup.html", {"form": form, "next": _safe_next(request)})
+
+
+def _safe_next(request):
+    next_url = request.POST.get("next") or request.GET.get("next") or ""
+    if url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        return next_url
+    return ""
 
 
 def _send_verification_code(email):
@@ -1034,7 +1035,7 @@ def verify_email(request):
                 request.session.pop("pending_registration", None)
                 login(request, user)
                 messages.success(request, "Your email has been verified. Welcome to IKart!")
-                return redirect("storefront:home")
+                return redirect(pending.get("next") or "storefront:home")
             else:
                 pending["attempts"] += 1
                 request.session["pending_registration"] = pending

@@ -26,5 +26,5 @@
       </div>
       <button type="submit" class="ik-btn ik-btn-primary ik-btn-lg ik-btn-block">Sign in</button>
     </form>
-    <p class="ik-auth-alt">New here? <a class="ik-link" href="{% url 'storefront:signup' %}">Create an account</a></p>
+    <p class="ik-auth-alt">New here? <a class="ik-link" href="{% url 'storefront:signup' %}{% if request.GET.next %}?next={{ request.GET.next|urlencode }}{% endif %}">Create an account</a></p>
 {% endblock %}

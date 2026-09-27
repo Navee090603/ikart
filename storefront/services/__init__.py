@@ -126,7 +126,7 @@ def restore_order_inventory(order):
         return True
 
 
-def _release_coupon_redemption(order):
+def release_coupon_redemption(order):
     """Do not consume a coupon for an online payment that did not complete."""
     CouponRedemption.objects.filter(order=order).delete()
 
@@ -200,11 +200,22 @@ def fail_or_cancel_payment(payment, status, payload=None):
         payment.save(update_fields=["status", "provider_payload", "inventory_released", "updated_at"])
         order = payment.order
         restore_order_inventory(order)
-        _release_coupon_redemption(order)
+        release_coupon_redemption(order)
         order.payment_status = "failed" if status == PaymentTransaction.Status.FAILED else "cancelled"
         order.status = Order.Status.PAYMENT_FAILED
         order.save(update_fields=["payment_status", "status", "updated_at"])
         return order
+
+
+def claim_guest_orders(user):
+    """Attach orders placed as a guest to the account with the same email.
+
+    Safe because account emails are verified by OTP at sign-up and can't be
+    changed afterwards.
+    """
+    if not user.email:
+        return 0
+    return Order.objects.filter(user__isnull=True, email__iexact=user.email).update(user=user)
 
 
 def razorpay_client():
