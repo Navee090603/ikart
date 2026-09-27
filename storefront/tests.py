@@ -851,6 +851,58 @@ class ShoppingFlowTests(TestCase):
         system_prompt = provider.get_response.call_args[0][0]
         self.assertIn(order.number, system_prompt)
 
+    def start_online_checkout(self, fake_client, link_id):
+        fake_client.payment_link.create.return_value = self.payment_link_response(link_id)
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
+        response = self.client.post(reverse("storefront:checkout"), self.checkout_data(payment_method="razorpay"))
+        self.assertEqual(response["Location"], f"https://rzp.io/i/{link_id}")
+        return Order.objects.get(payment_transaction__provider_payment_link_id=link_id)
+
+    def webhook_capture(self, order):
+        from .services import mark_payment_captured
+        mark_payment_captured(order.payment_transaction, "pay_webhook", {"id": "pay_webhook", "amount": 29900})
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_CURRENCY="INR")
+    @patch("storefront.views.razorpay.Client")
+    def test_return_after_webhook_already_confirmed_still_clears_cart(self, client_class):
+        import hashlib
+        import hmac
+        order = self.start_online_checkout(client_class.return_value, "plink_race")
+        self.webhook_capture(order)
+        signature = hmac.new(b"secret", f"plink_race|{order.number}|paid|pay_webhook".encode(), hashlib.sha256).hexdigest()
+        response = self.client.get(reverse("storefront:razorpay_payment_link_callback", args=[order.number]), {
+            "razorpay_payment_link_id": "plink_race", "razorpay_payment_link_reference_id": order.number,
+            "razorpay_payment_link_status": "paid", "razorpay_payment_id": "pay_webhook", "razorpay_signature": signature,
+        })
+        self.assertRedirects(response, reverse("storefront:order_confirmation", args=[order.number]))
+        self.assertFalse(self.client.session.get("cart"))
+        self.assertNotIn("checkout_token", self.client.session)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_CURRENCY="INR")
+    @patch("storefront.views.razorpay.Client")
+    def test_next_checkout_is_not_sent_to_an_order_paid_via_webhook(self, client_class):
+        first = self.start_online_checkout(client_class.return_value, "plink_first")
+        self.webhook_capture(first)  # customer closed the tab; never returned from Razorpay
+        client_class.return_value.payment_link.create.return_value = self.payment_link_response("plink_second")
+        stale_form_token = self.client.session["checkout_token"]
+        response = self.client.post(reverse("storefront:checkout"), {
+            **self.checkout_data(payment_method="razorpay"), "checkout_token": stale_form_token,
+        })
+        self.assertEqual(response["Location"], "https://rzp.io/i/plink_second")
+        second = Order.objects.exclude(pk=first.pk).get()
+        self.assertEqual(second.status, Order.Status.PAYMENT_PENDING)
+        self.assertNotEqual(str(second.checkout_token), stale_form_token)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_CURRENCY="INR")
+    @patch("storefront.views.razorpay.Client")
+    def test_double_clicking_place_order_resumes_the_same_payment(self, client_class):
+        first = self.start_online_checkout(client_class.return_value, "plink_once")
+        response = self.client.post(reverse("storefront:checkout"), {
+            **self.checkout_data(payment_method="razorpay"), "checkout_token": str(first.checkout_token),
+        })
+        self.assertEqual(response["Location"], "https://rzp.io/i/plink_once")
+        self.assertEqual(Order.objects.count(), 1)
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings

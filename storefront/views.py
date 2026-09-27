@@ -428,6 +428,25 @@ def _can_access_order(request, order):
     return not is_expired
 
 
+def _online_checkout_finished(token):
+    """True once the online order started with this checkout token is no longer awaiting payment.
+
+    Razorpay orders are always completed outside the checkout request (return page,
+    webhook or reservation sweep), so a token still held after that is stale. COD
+    orders finish inside the checkout request, which already clears the token.
+    """
+    return Order.objects.filter(
+        checkout_token=token, payment_method=Order.PaymentMethod.RAZORPAY,
+    ).exclude(status=Order.Status.PAYMENT_PENDING).exists()
+
+
+def _finish_checkout_session(request, order):
+    """Empty this browser's cart once its online order is paid, however the payment was confirmed."""
+    if order.checkout_token and request.session.get("checkout_token") == str(order.checkout_token):
+        Cart(request).clear()
+        request.session.pop("checkout_token", None)
+
+
 def _razorpay_client():
     if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
         return None
@@ -489,12 +508,19 @@ def checkout(request):
         messages.info(request, "Your cart is empty.")
         return redirect("storefront:product_list")
     session_token = request.session.get("checkout_token")
+    if session_token and _online_checkout_finished(session_token):
+        session_token = None
     checkout_token = session_token or _new_checkout_token(request)
     if request.method == "POST":
         form = CheckoutForm(request.POST, user=request.user)
         if form.is_valid():
             token = form.cleaned_data["checkout_token"]
-            if str(token) != request.session.get("checkout_token"):
+            if str(token) != str(checkout_token) and _online_checkout_finished(token):
+                # The page was opened before an earlier online order finished elsewhere.
+                token = checkout_token
+            if str(token) != str(checkout_token):
+                form.data = form.data.copy()
+                form.data["checkout_token"] = str(checkout_token)
                 form.add_error(None, "This checkout has expired. Please review your cart and try again.")
                 return render(request, "storefront/checkout.html", {"cart": cart, "form": form, "quote": calculate_cart_quote(cart, request.user, form.cleaned_data["delivery_option"], form.cleaned_data["coupon_code"])})
             existing_order = Order.objects.filter(checkout_token=token).first()
@@ -608,6 +634,7 @@ def razorpay_payment_link_callback(request, number):
         messages.error(request, "We could not verify this payment return. Please wait for the payment status update.")
         return redirect("storefront:order_confirmation", number=order.number)
     if payment.status == PaymentTransaction.Status.CAPTURED:
+        _finish_checkout_session(request, order)
         _remember_order(request, order.number)
         return redirect("storefront:order_confirmation", number=order.number)
     client = _razorpay_client()
@@ -653,6 +680,7 @@ def verify_razorpay_payment(request, number):
         raise Http404
     payment = get_object_or_404(PaymentTransaction, order=order)
     if payment.status == PaymentTransaction.Status.CAPTURED:
+        _finish_checkout_session(request, order)
         return redirect("storefront:order_confirmation", number=order.number)
     provider_order_id = request.POST.get("razorpay_order_id", "")
     provider_payment_id = request.POST.get("razorpay_payment_id", "")
