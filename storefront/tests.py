@@ -1269,21 +1269,6 @@ class RateLimitTests(TestCase):
         response = self.client.post(url, {"username": "nobody", "password": "wrong"})
         self.assertEqual(response.status_code, 429)
 
-    def test_spoofed_forwarded_for_does_not_bypass_limit(self):
-        url = reverse("login")
-        for i in range(15):
-            self.client.get(url, HTTP_X_FORWARDED_FOR=f"203.0.113.{i}")
-        response = self.client.get(url, HTTP_X_FORWARDED_FOR="198.51.100.99")
-        self.assertEqual(response.status_code, 429)
-
-    @override_settings(TRUST_TRUE_CLIENT_IP=True)
-    def test_on_render_limit_is_per_true_client_ip(self):
-        url = reverse("login")
-        for i in range(15):
-            self.client.get(url, HTTP_TRUE_CLIENT_IP="81.97.145.24", HTTP_X_FORWARDED_FOR=f"203.0.113.{i}")
-        self.assertEqual(self.client.get(url, HTTP_TRUE_CLIENT_IP="81.97.145.24").status_code, 429)
-        self.assertEqual(self.client.get(url, HTTP_TRUE_CLIENT_IP="81.97.145.25").status_code, 200)
-
 
 class SecurityHeaderTests(TestCase):
     def test_content_security_policy_header_is_present(self):

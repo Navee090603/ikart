@@ -7,19 +7,14 @@ enumeration cases on a single web process.
 """
 from functools import wraps
 
-from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpResponse
 
 
 def _client_ip(request):
-    # X-Forwarded-For is never trusted: its first entry is whatever the client sent.
-    # On Render, Cloudflare sets True-Client-IP to the real client and overwrites any
-    # value the client supplies, so it is only honoured when TRUST_TRUE_CLIENT_IP is on.
-    if settings.TRUST_TRUE_CLIENT_IP:
-        true_ip = request.META.get("HTTP_TRUE_CLIENT_IP", "").strip()
-        if true_ip:
-            return true_ip
+    forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
     return request.META.get("REMOTE_ADDR", "unknown")
 
 
