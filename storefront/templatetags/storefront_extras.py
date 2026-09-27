@@ -12,6 +12,15 @@ def dict_get(mapping, key):
     return mapping.get(key)
 
 
+@register.filter
+def mobile_display(value):
+    """+919361995937 (or a bare 10-digit number) -> "+91 93619 95937"."""
+    digits = (value or "").removeprefix("+91")
+    if len(digits) == 10 and digits.isdigit():
+        return f"+91 {digits[:5]} {digits[5:]}"
+    return value
+
+
 # IKart design-system icons: 24px outline set, 2px round stroke, drawn in currentColor.
 ICON_PATHS = {
     "search": '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',

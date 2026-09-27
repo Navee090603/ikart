@@ -28,6 +28,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .cart import Cart
+from .templatetags.storefront_extras import mobile_display
 from .forms import AddressForm, ChangePendingEmailForm, CheckoutForm, MarketingPreferenceForm, OrderRequestForm, OTPVerificationForm, ProductQuestionForm, ReviewForm, SignUpForm, SupportTicketForm, UserProfileForm
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductQuestion, ProductVariant, ProductView, Review, SavedForLaterItem, Shipment, SupportTicket, UserProfile, WishlistItem
 from .payments.razorpay_links import PaymentLinkError, cancel_payment_link, create_payment_link, verify_payment_link_signature
@@ -1238,12 +1239,13 @@ def support_ticket(request, ticket_id):
 @login_required
 def account(request):
     profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    saved_phone = profile.phone
     form = UserProfileForm(request.POST or None, instance=profile)
     if request.method == "POST" and form.is_valid():
         form.save()
-        messages.success(request, "Your account details were updated.")
+        messages.success(request, f"Mobile number saved: {mobile_display(profile.phone)}")
         return redirect("storefront:account")
-    return render(request, "storefront/account.html", {"form": form})
+    return render(request, "storefront/account.html", {"form": form, "saved_phone": saved_phone})
 
 
 @login_required

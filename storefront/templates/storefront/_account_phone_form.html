@@ -1,0 +1,10 @@
+<form method="post" class="ik-form flex flex-col gap-3 max-w-sm pb-4" novalidate data-live-validate>
+  {% csrf_token %}
+  <div class="ik-field">
+    <label for="{{ form.phone.id_for_label }}">Mobile number</label>
+    {{ form.phone }}
+    <p id="{{ form.phone.id_for_label }}_error" class="ik-error{% if not form.phone.errors %} hidden{% endif %}">{{ form.phone.errors.0 }}</p>
+    <p class="ik-muted text-sm">We use it for delivery updates and fill it in for you at checkout.</p>
+  </div>
+  <button class="ik-btn ik-btn-primary self-start">{{ button_label }}</button>
+</form>

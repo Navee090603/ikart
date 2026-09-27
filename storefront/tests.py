@@ -1592,10 +1592,15 @@ class AccountPageTests(TestCase):
         self.assertTrue(UserProfile.objects.filter(user=self.user).exists())
 
     def test_post_updates_phone_number(self):
+        self.assertContains(self.client.get(self.url), "Not added yet")
         response = self.client.post(self.url, {"phone": "9566149359"}, follow=True)
         self.assertEqual(response.status_code, 200)
         profile = UserProfile.objects.get(user=self.user)
         self.assertEqual(profile.phone, "+919566149359")
+        self.assertContains(response, "Mobile number saved: +91 95661 49359")
+        self.assertContains(response, "<dd class=\"m-0\">+91 95661 49359</dd>", html=False)
+        self.assertContains(response, "Change mobile number")
+        self.assertNotContains(response, "Not added yet")
 
     def test_password_change_view_renders(self):
         response = self.client.get(reverse("password_change"))
