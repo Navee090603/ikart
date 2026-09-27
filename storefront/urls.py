@@ -3,6 +3,7 @@ from django.contrib.auth import views as auth_views
 from django.urls import path
 
 from . import views
+from .ratelimit import rate_limit
 
 app_name = "storefront"
 urlpatterns = [
@@ -50,12 +51,12 @@ urlpatterns = [
     path("chat/", views.chat_message, name="chat_message"),
     path(
         "password-reset/",
-        views.IKartPasswordResetView.as_view(
+        rate_limit("password_reset", limit=10, period_seconds=900)(views.IKartPasswordResetView.as_view(
             template_name="storefront/password_reset.html",
             email_template_name="storefront/password_reset_email.txt",
             subject_template_name="storefront/password_reset_subject.txt",
             success_url=reverse_lazy("storefront:password_reset_done"),
-        ),
+        )),
         name="password_reset",
     ),
 

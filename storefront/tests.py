@@ -1285,6 +1285,24 @@ class RateLimitTests(TestCase):
         self.assertEqual(self.client.get(url, HTTP_TRUE_CLIENT_IP="81.97.145.25").status_code, 200)
 
 
+    def test_password_reset_page_is_rate_limited_per_ip(self):
+        url = reverse("storefront:password_reset")
+        for _ in range(10):
+            self.assertNotEqual(self.client.get(url).status_code, 429)
+        self.assertEqual(self.client.get(url).status_code, 429)
+
+    def test_stock_password_reset_url_goes_to_the_limited_one(self):
+        response = self.client.get("/accounts/password_reset/")
+        self.assertRedirects(response, reverse("storefront:password_reset"), fetch_redirect_response=False)
+
+    def test_reset_emails_per_address_are_capped(self):
+        User.objects.create_user("victim", "victim@example.com", "Secur3Password!")
+        url = reverse("storefront:password_reset")
+        for _ in range(5):
+            response = self.client.post(url, {"email": "Victim@Example.com"})
+            self.assertRedirects(response, reverse("storefront:password_reset_done"), fetch_redirect_response=False)
+        self.assertEqual(len(mail.outbox), 3)
+
 class SecurityHeaderTests(TestCase):
     def test_content_security_policy_header_is_present(self):
         response = self.client.get(reverse("storefront:home"))

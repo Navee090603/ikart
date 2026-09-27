@@ -14,6 +14,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import User
 from django.conf import settings
+from django.core.cache import cache
 from django.core.mail import send_mail
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
@@ -50,9 +51,27 @@ def health_check(request):
     return HttpResponse("ok", status=200)
 
 
+RESET_EMAILS_PER_ADDRESS_PER_HOUR = 3
+
+
+def _reset_email_allowed(email):
+    key = "ratelimit:password_reset_email:" + hashlib.sha256(email.strip().lower().encode()).hexdigest()
+    if cache.add(key, 1, timeout=3600):
+        return True
+    try:
+        return cache.incr(key) <= RESET_EMAILS_PER_ADDRESS_PER_HOUR
+    except ValueError:
+        cache.set(key, 1, timeout=3600)
+        return True
+
+
 class IKartPasswordResetView(auth_views.PasswordResetView):
     def form_valid(self, form):
         logger = logging.getLogger(__name__)
+        if not _reset_email_allowed(form.cleaned_data["email"]):
+            # Same response as a sent email, so this doesn't reveal which addresses exist.
+            logger.warning("Password reset email suppressed: per-address hourly limit reached.")
+            return redirect(self.get_success_url())
         if not settings.SITE_URL or not isinstance(settings.SITE_URL, str):
             logger.error(f"SITE_URL is not properly configured: {settings.SITE_URL}")
             messages.error(self.request, "Password reset is temporarily unavailable. Please try again later.")

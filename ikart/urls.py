@@ -2,6 +2,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
+from django.views.generic import RedirectView
 
 from django.contrib.auth import views as auth_views
 
@@ -28,6 +29,8 @@ urlpatterns = [
         auth_views.PasswordChangeView.as_view(form_class=ChangePasswordForm),
         name="password_change",
     ),
+    # Django's stock reset view has no rate limit; send it to IKart's limited one.
+    path("accounts/password_reset/", RedirectView.as_view(pattern_name="storefront:password_reset")),
     path("accounts/", include("django.contrib.auth.urls")),
     path("", include("storefront.urls", namespace="storefront")),
 ]
