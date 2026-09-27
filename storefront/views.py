@@ -32,7 +32,7 @@ from .forms import AddressForm, ChangePendingEmailForm, CheckoutForm, MarketingP
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductQuestion, ProductVariant, ProductView, Review, SavedForLaterItem, Shipment, SupportTicket, UserProfile, WishlistItem
 from .payments.razorpay_links import PaymentLinkError, cancel_payment_link, create_payment_link, verify_payment_link_signature
 from .ratelimit import rate_limit
-from .services import build_order_tracking_steps, calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, release_expired_reservations_if_due, restore_order_inventory, verified_purchaser_ids
+from .services import build_order_tracking_steps, calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, release_expired_reservations_if_due, restore_order_inventory, run_daily_cleanup_if_due, verified_purchaser_ids
 from .services.lux import get_lux
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.views import redirect_to_login
@@ -178,6 +178,7 @@ def search_autocomplete(request):
 
 def product_detail(request, slug):
     release_expired_reservations_if_due()
+    run_daily_cleanup_if_due()
     product = get_object_or_404(Product.objects.prefetch_related("images", "variants", "reviews__user"), slug=slug, is_active=True)
     if not request.session.session_key:
         request.session.create()

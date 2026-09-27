@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from importlib import import_module
 import logging
 
 from django.conf import settings
@@ -286,6 +287,26 @@ def release_stale_payment_reservations(cutoff, client=None):
         if order.payment_status == "cancelled":
             released += 1
     return released
+
+
+CLEANUP_KEY = "maintenance:daily_cleanup"
+PRODUCT_VIEW_RETENTION_DAYS = 90
+
+
+def run_daily_cleanup_if_due():
+    """Delete expired sessions and old product-view rows, at most once a day per process.
+
+    Both tables otherwise grow forever: every product page view adds a row, and Django only
+    removes expired sessions via the clearsessions command, which Render's free plan can't
+    schedule.
+    """
+    if not cache.add(CLEANUP_KEY, True, timeout=24 * 60 * 60):
+        return
+    try:
+        ProductView.objects.filter(created_at__lt=timezone.now() - timedelta(days=PRODUCT_VIEW_RETENTION_DAYS)).delete()
+        import_module(settings.SESSION_ENGINE).SessionStore.clear_expired()
+    except Exception:
+        logging.getLogger(__name__).exception("Daily cleanup failed")
 
 
 RESERVATION_SWEEP_KEY = "payments:reservation_sweep"

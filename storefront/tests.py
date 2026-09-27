@@ -1028,6 +1028,24 @@ class ShoppingFlowTests(TestCase):
                                      content_type="application/json").json()["reply"]
         self.assertEqual(reply, "\u0915\u094d\u200d\u0937")
 
+    def test_daily_cleanup_removes_expired_sessions_and_old_product_views(self):
+        from django.contrib.sessions.models import Session
+        from .models import ProductView
+        stale = Session.objects.create(session_key="stale", session_data="x", expire_date=timezone.now() - timedelta(days=1))
+        live = Session.objects.create(session_key="live", session_data="x", expire_date=timezone.now() + timedelta(days=1))
+        old_view = ProductView.objects.create(product=self.product, session_key="old")
+        ProductView.objects.filter(pk=old_view.pk).update(created_at=timezone.now() - timedelta(days=91))
+        recent_view = ProductView.objects.create(product=self.product, session_key="recent")
+        self.client.get(self.product.get_absolute_url())
+        self.assertFalse(Session.objects.filter(pk=stale.pk).exists())
+        self.assertTrue(Session.objects.filter(pk=live.pk).exists())
+        self.assertFalse(ProductView.objects.filter(pk=old_view.pk).exists())
+        self.assertTrue(ProductView.objects.filter(pk=recent_view.pk).exists())
+        # Runs at most once a day: new stale data isn't touched by the next visit.
+        again = Session.objects.create(session_key="stale2", session_data="x", expire_date=timezone.now() - timedelta(days=1))
+        self.client.get(self.product.get_absolute_url())
+        self.assertTrue(Session.objects.filter(pk=again.pk).exists())
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings
