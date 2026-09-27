@@ -25,36 +25,37 @@ class LuxChatbot {
     const widget = document.createElement('div');
     widget.id = 'lux-widget';
     widget.innerHTML = `
-      <div id="lux-button" class="lux-button" title="Chat with Lux">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <button type="button" id="lux-button" class="lux-button" aria-label="Chat with Lux" aria-expanded="false" aria-controls="lux-panel">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
         </svg>
         <span class="lux-badge" id="lux-badge" style="display: none;">1</span>
-      </div>
-      <div id="lux-panel" class="lux-panel">
+      </button>
+      <div id="lux-panel" class="lux-panel" role="dialog" aria-label="Lux, IKart assistant" inert>
         <div class="lux-header">
           <div class="lux-title">
             <span>Lux</span>
             <span class="lux-subtitle">IKart Assistant</span>
           </div>
-          <button id="lux-close" class="lux-close" title="Close">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <button type="button" id="lux-close" class="lux-close" aria-label="Close chat">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
           </button>
         </div>
-        <div id="lux-messages" class="lux-messages">
+        <div id="lux-messages" class="lux-messages" role="log" aria-live="polite" aria-label="Conversation">
           <div class="lux-message lux-message-bot">
             <div class="lux-message-content">Hi! I'm Lux, your IKart shopping assistant. How can I help you today?</div>
           </div>
         </div>
         <div class="lux-suggestions" id="lux-suggestions">
-          <button class="lux-suggestion" data-message="Track my order">Track order</button>
-          <button class="lux-suggestion" data-message="Tell me about returns">Returns</button>
-          <button class="lux-suggestion" data-message="Size guide">Size guide</button>
+          <button type="button" class="lux-suggestion" data-message="Track my order">Track order</button>
+          <button type="button" class="lux-suggestion" data-message="Tell me about returns">Returns</button>
+          <button type="button" class="lux-suggestion" data-message="Size guide">Size guide</button>
         </div>
         <div class="lux-input-area">
+          <label for="lux-input" class="ik-sr">Message Lux</label>
           <input
             id="lux-input"
             type="text"
@@ -62,8 +63,8 @@ class LuxChatbot {
             placeholder="Type your question..."
             autocomplete="off"
           />
-          <button id="lux-send" class="lux-send" title="Send">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <button type="button" id="lux-send" class="lux-send" aria-label="Send message">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <line x1="22" y1="2" x2="11" y2="13"></line>
               <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
             </svg>
@@ -83,6 +84,9 @@ class LuxChatbot {
 
     button.addEventListener('click', () => this.toggle());
     closeBtn.addEventListener('click', () => this.toggle());
+    document.getElementById('lux-panel').addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.isOpen) this.toggle();
+    });
     sendBtn.addEventListener('click', () => this.sendMessage());
     input.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') this.sendMessage();
@@ -102,6 +106,9 @@ class LuxChatbot {
     const button = document.getElementById('lux-button');
     this.isOpen = !this.isOpen;
 
+    // inert keeps the closed (merely transparent) panel out of the tab order and screen readers.
+    panel.inert = !this.isOpen;
+    button.setAttribute('aria-expanded', String(this.isOpen));
     if (this.isOpen) {
       panel.classList.add('lux-open');
       button.classList.add('lux-button-open');
@@ -109,6 +116,7 @@ class LuxChatbot {
     } else {
       panel.classList.remove('lux-open');
       button.classList.remove('lux-button-open');
+      button.focus();
     }
   }
 
