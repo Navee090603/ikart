@@ -24,6 +24,12 @@ class LuxChatbot:
                 raise ValueError("CLAUDE_API_KEY not configured in settings")
             return get_ai_provider("claude", api_key=api_key)
 
+        elif self.provider_name == "groq":
+            api_key = getattr(settings, "GROQ_API_KEY", "")
+            if not api_key:
+                raise ValueError("GROQ_API_KEY not configured in settings")
+            return get_ai_provider("groq", api_key=api_key)
+
         elif self.provider_name == "openai":
             api_key = getattr(settings, "OPENAI_API_KEY", "")
             if not api_key:

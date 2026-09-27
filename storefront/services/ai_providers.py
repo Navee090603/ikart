@@ -6,6 +6,7 @@ Allows swapping between Claude API, OpenAI, Ollama, etc. without code changes.
 from abc import ABC, abstractmethod
 from typing import Optional
 import anthropic
+import requests
 
 
 class AIProvider(ABC):
@@ -104,6 +105,97 @@ IF UNSURE:
         return base_prompt
 
 
+class GroqProvider(AIProvider):
+    """Groq Cloud API implementation - fast inference, free tier available."""
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.api_url = "https://api.groq.com/openai/v1/chat/completions"
+        self.model = "mixtral-8x7b-32768"
+
+    def get_response(self, message: str, session_id: str, context: Optional[dict] = None) -> str:
+        """Get response from Groq API."""
+        system_prompt = self._build_system_prompt(context)
+
+        try:
+            response = requests.post(
+                self.api_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": message}
+                    ],
+                    "max_tokens": 500,
+                    "temperature": 0.7
+                },
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+            elif response.status_code == 401:
+                return "Authentication failed. Please check your API key."
+            elif response.status_code == 429:
+                return "I'm experiencing high demand. Please try again in a moment!"
+            else:
+                return "I'm temporarily unavailable. Our support team is here to help: /support/"
+
+        except requests.exceptions.Timeout:
+            return "Request timed out. Please try again."
+        except requests.exceptions.RequestException as e:
+            return "I'm having trouble connecting. Please try again or contact support."
+
+    def _build_system_prompt(self, context: Optional[dict] = None) -> str:
+        """Build Lux system prompt with optional user context."""
+        base_prompt = """You are Lux, IKart's intelligent shopping assistant. Your mission is to make
+shopping delightful, fast, and worry-free.
+
+PERSONALITY:
+- Warm and professional
+- Concise (2-3 sentences per response max)
+- Proactive (anticipate customer needs)
+- Honest (admit when unsure, offer escalation)
+
+CORE POLICIES TO REMEMBER:
+- 30-day returns: No questions asked, full refund
+- Shipping: Standard and Express options available
+- Payment: Razorpay secure checkout (SSL encrypted)
+- Quality: All products curated for durability & style
+- Support hours: 24/7 automated, human support available
+
+WHAT YOU CAN DO:
+✓ Recommend products based on customer preferences
+✓ Answer questions about sizing, materials, fit
+✓ Help with checkout, payment, orders
+✓ Track orders (if customer is logged in)
+✓ Explain policies, returns, shipping
+✓ Suggest support escalation when needed
+
+WHAT YOU CANNOT DO:
+✗ Create new orders on behalf of customer
+✗ Process refunds directly (suggest support)
+✗ Access payment details or sensitive information
+✗ Make up product features or policies
+
+IF UNSURE:
+- Say "I'm not certain, but our support team can help"
+- Suggest: Contact our support team at /support/
+- Always maintain customer trust"""
+
+        if context and "username" in context:
+            username = context["username"]
+            if username:
+                base_prompt += f"\n\nCUSTOMER CONTEXT:\nThis customer's name is {username}. Use their name for personalization when appropriate."
+
+        return base_prompt
+
+
 class OpenAIProvider(AIProvider):
     """OpenAI ChatGPT implementation (stub for future migration)."""
 
@@ -144,6 +236,7 @@ def get_ai_provider(provider_name: str, **kwargs) -> AIProvider:
     """
     providers = {
         "claude": ClaudeProvider,
+        "groq": GroqProvider,
         "openai": OpenAIProvider,
         "ollama": OllamaProvider,
     }
