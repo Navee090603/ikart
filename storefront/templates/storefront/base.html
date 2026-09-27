@@ -9,18 +9,11 @@
   <meta name="theme-color" content="#1C2127" media="(prefers-color-scheme: dark)">
   <link rel="icon" type="image/svg+xml" href="{% static 'storefront/favicon.svg' %}">
   <link rel="preload" href="{% static 'storefront/fonts/DMSans-latin-var.woff2' %}" as="font" type="font/woff2" crossorigin>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    // Tailwind handles layout utilities only; every colour, radius and font comes from the IKart tokens in ikart.css.
-    tailwind.config = { corePlugins: { preflight: true }, theme: { extend: {
-      colors: { brand: 'var(--brand)', 'brand-soft': 'var(--brand-soft)', 'brand-strong': 'var(--brand-strong)', accent: 'var(--accent)',
-        ink: 'var(--ink)', muted: 'var(--ink-muted)', surface: 'var(--surface)', raised: 'var(--surface-raised)', line: 'var(--border)',
-        success: 'var(--success)', 'success-soft': 'var(--success-soft)', danger: 'var(--danger)', 'danger-soft': 'var(--danger-soft)' },
-      fontFamily: { sans: ['DM Sans', 'DM Sans Ext', 'Nunito Sans', 'system-ui', 'sans-serif'] } } } };
-  </script>
   <link rel="stylesheet" href="{% static 'storefront/css/ikart.css' %}">
   <link rel="stylesheet" href="{% static 'storefront/css/lux.css' %}">
   {% block extra_head %}{% endblock %}
+  {# Built by scripts/build_css.sh; kept last in <head>, where the Tailwind CDN used to inject its styles. #}
+  <link rel="stylesheet" href="{% static 'storefront/css/tailwind.css' %}">
 </head>
 <body>
   <a class="ik-sr" href="#main">Skip to content</a>
