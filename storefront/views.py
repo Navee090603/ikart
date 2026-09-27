@@ -1198,13 +1198,17 @@ def trust_page(request, page):
 @require_POST
 def chat_message(request):
     """Handle Lux chatbot messages via AJAX."""
+    print(f"DEBUG: Lux chat endpoint called")
+    print(f"DEBUG: AI_PROVIDER = {getattr(settings, 'AI_PROVIDER', 'NOT SET')}")
+    print(f"DEBUG: GROQ_API_KEY = {getattr(settings, 'GROQ_API_KEY', 'NOT SET')[:20] if getattr(settings, 'GROQ_API_KEY', '') else 'EMPTY'}...")
+
     try:
         data = json.loads(request.body)
         message = data.get('message', '').strip()
         session_id = data.get('session_id', str(uuid4()))
 
         if not message:
-            return JsonResponse({'error': 'Message cannot be empty'}, status=400)
+            return JsonResponse({'reply': 'Message cannot be empty', 'error': 'empty_message'}, status=400)
 
         # Build user context if authenticated
         user_context = {}
@@ -1213,28 +1217,38 @@ def chat_message(request):
 
         # Get Lux's response
         try:
+            print(f"DEBUG: Initializing Lux...")
             lux = get_lux()
+            print(f"DEBUG: Lux initialized, calling chat()...")
             response = lux.chat(message, session_id, user_context)
+            print(f"DEBUG: Got response: {response[:50] if response else 'None'}...")
         except Exception as e:
-            error_msg = f"Lux initialization error: {str(e)}"
+            error_msg = str(e)
+            print(f"DEBUG: Lux error: {error_msg}")
             logger.exception(error_msg)
             return JsonResponse({
-                'reply': f"[System Error] {error_msg}",
+                'reply': f"Lux Error: {error_msg}",
                 'session_id': session_id,
-                'error': error_msg
+                'error': error_msg,
+                'status': 'error'
             })
 
         return JsonResponse({
-            'reply': response,
+            'reply': response or "No response",
             'session_id': session_id,
-            'suggestions': ['Track order', 'Returns', 'Size guide', 'Support']
+            'suggestions': ['Track order', 'Returns', 'Size guide', 'Support'],
+            'status': 'success'
         })
 
-    except json.JSONDecodeError:
-        return JsonResponse({'error': 'Invalid JSON in request body'}, status=400)
+    except json.JSONDecodeError as e:
+        print(f"DEBUG: JSON decode error: {str(e)}")
+        return JsonResponse({'reply': 'Invalid JSON', 'error': 'json_error'}, status=400)
     except Exception as e:
-        logger.exception(f"Lux chat error: {str(e)}")
+        error_msg = str(e)
+        print(f"DEBUG: Unexpected error: {error_msg}")
+        logger.exception(f"Lux chat error: {error_msg}")
         return JsonResponse({
-            'reply': f"[Error] {str(e)}",
-            'error': str(e)
+            'reply': f"Error: {error_msg}",
+            'error': error_msg,
+            'status': 'error'
         }, status=500)
