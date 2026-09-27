@@ -1,3 +1,5 @@
+import re
+
 from django import forms
 from django.contrib.auth.forms import (
     AuthenticationForm,
@@ -25,6 +27,32 @@ NEW_PASSWORD_VALIDATE_RULE = "required minlength notnumeric notalpha special not
 # uses for its checkbox, or they render as oversized boxes.
 RADIO_WIDGET_ATTRS = {"class": "ik-radio"}
 
+# Format check only: proves the number looks like a real Indian mobile, not that the
+# user owns it (that needs OTP). Stored as +91XXXXXXXXXX so OTP can be added later.
+_INDIAN_MOBILE = re.compile(r"[6-9]\d{9}")
+_PLACEHOLDER_MOBILES = {"9876543210", "6789012345", "7890123456", "8901234567"}
+MOBILE_WIDGET_ATTRS = {
+    "type": "tel", "inputmode": "tel", "autocomplete": "tel", "placeholder": "e.g. 98765 43210",
+    "data-validate": "required mobile",
+}
+
+
+def normalize_indian_mobile(value):
+    digits = re.sub(r"[\s\-().]", "", value or "")
+    if digits.startswith("+"):
+        digits = digits[1:]
+        if not digits.startswith("91"):
+            raise ValidationError("Enter a valid 10-digit Indian mobile number (starting with 6, 7, 8 or 9).")
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    if not _INDIAN_MOBILE.fullmatch(digits):
+        raise ValidationError("Enter a valid 10-digit Indian mobile number (starting with 6, 7, 8 or 9).")
+    if len(set(digits)) == 1 or digits in _PLACEHOLDER_MOBILES:
+        raise ValidationError("Please enter your real mobile number.")
+    return f"+91{digits}"
+
 
 def _validate_email_not_registered(email):
     email = email.strip().lower()
@@ -35,6 +63,7 @@ def _validate_email_not_registered(email):
 
 class SignUpForm(UserCreationForm):
     email = forms.EmailField(required=True)
+    phone = forms.CharField(label="Mobile number", max_length=20, widget=forms.TextInput(attrs=MOBILE_WIDGET_ATTRS))
 
     class Meta(UserCreationForm.Meta):
         model = User
@@ -57,6 +86,9 @@ class SignUpForm(UserCreationForm):
 
     def clean_email(self):
         return _validate_email_not_registered(self.cleaned_data["email"])
+
+    def clean_phone(self):
+        return normalize_indian_mobile(self.cleaned_data["phone"])
 
     def _post_clean(self):
         # BaseUserCreationForm._post_clean() builds self.instance (needed
@@ -177,6 +209,10 @@ class CheckoutForm(forms.ModelForm):
                     "address_line2": default_address.line2, "city": default_address.city,
                     "state": default_address.state, "postal_code": default_address.postal_code,
                 })
+            elif not self.is_bound:
+                profile_phone = UserProfile.objects.filter(user=user).values_list("phone", flat=True).first()
+                if profile_phone:
+                    self.initial["phone"] = profile_phone
         else:
             self.fields.pop("saved_address")
 
@@ -256,7 +292,15 @@ class UserProfileForm(forms.ModelForm):
     class Meta:
         model = UserProfile
         fields = ("phone",)
-        widgets = {"phone": forms.TextInput(attrs={"placeholder": "e.g. 9876543210"})}
+        labels = {"phone": "Mobile number"}
+        widgets = {"phone": forms.TextInput(attrs=MOBILE_WIDGET_ATTRS)}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["phone"].required = True
+
+    def clean_phone(self):
+        return normalize_indian_mobile(self.cleaned_data["phone"])
 
 
 class ReviewForm(forms.ModelForm):

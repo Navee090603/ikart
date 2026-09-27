@@ -50,7 +50,7 @@ class ShoppingFlowTests(TestCase):
     def test_new_account_requires_email_otp_before_activation(self):
         response = self.client.post(reverse("storefront:signup"), {
             "username": "newbuyer", "email": "newbuyer@example.com",
-            "password1": "Secur3Password!", "password2": "Secur3Password!",
+            "phone": "9566149359", "password1": "Secur3Password!", "password2": "Secur3Password!",
         })
         self.assertRedirects(response, reverse("storefront:verify_email"))
         self.assertFalse(User.objects.filter(username="newbuyer").exists())
@@ -64,7 +64,7 @@ class ShoppingFlowTests(TestCase):
     def test_pending_signup_can_resend_code_from_verification_page(self):
         self.client.post(reverse("storefront:signup"), {
             "username": "waiting", "email": "waiting@example.com",
-            "password1": "Secur3Password!", "password2": "Secur3Password!",
+            "phone": "9566149359", "password1": "Secur3Password!", "password2": "Secur3Password!",
         })
         response = self.client.post(reverse("storefront:resend_verification_code"))
         self.assertRedirects(response, reverse("storefront:verify_email"))
@@ -660,7 +660,7 @@ class ShoppingFlowTests(TestCase):
     def sign_up_and_verify(self, next_url):
         self.client.post(f"{reverse('storefront:signup')}?next={next_url}", {
             "username": "newbuyer", "email": "newbuyer@example.com",
-            "password1": "Secur3Password!", "password2": "Secur3Password!",
+            "phone": "9566149359", "password1": "Secur3Password!", "password2": "Secur3Password!",
         })
         code = re.search(r"\b(\d{6})\b", mail.outbox[-1].body).group(1)
         return self.client.post(reverse("storefront:verify_email"), {"code": code})
@@ -1192,6 +1192,48 @@ class ShoppingFlowTests(TestCase):
         self.assertIn("5\u20137 working days", build_system_prompt())
         self.assertIn("ARN", build_system_prompt())
 
+    def test_indian_mobile_numbers_are_validated_and_normalised(self):
+        from django.core.exceptions import ValidationError
+        from .forms import normalize_indian_mobile
+        for raw in ("9566149359", "+91 95661 49359", "+919566149359", "919566149359", "09566149359", "95661-49359", "(956) 614 9359"):
+            self.assertEqual(normalize_indian_mobile(raw), "+919566149359", raw)
+        for raw in ("", "956614935", "95661493590", "1566149359", "5566149359", "0422 2345678", "9999999999", "9876543210", "+1 4155552671", "95661a4935"):
+            with self.assertRaises(ValidationError, msg=raw):
+                normalize_indian_mobile(raw)
+
+    def test_signup_requires_a_valid_mobile_and_saves_it_to_the_profile(self):
+        from .models import UserProfile
+        data = {"username": "phonebuyer", "email": "phonebuyer@example.com", "password1": "Secur3Password!", "password2": "Secur3Password!"}
+        response = self.client.post(reverse("storefront:signup"), data)
+        self.assertContains(response, 'id="id_phone_error"')
+        response = self.client.post(reverse("storefront:signup"), {**data, "phone": "12345"})
+        self.assertContains(response, "valid 10-digit Indian mobile number")
+        self.assertEqual(len(mail.outbox), 0)
+        self.client.post(reverse("storefront:signup"), {**data, "phone": "+91 95661 49359"})
+        code = re.search(r"\b(\d{6})\b", mail.outbox[-1].body).group(1)
+        self.client.post(reverse("storefront:verify_email"), {"code": code})
+        profile = UserProfile.objects.get(user__username="phonebuyer")
+        self.assertEqual(profile.phone, "+919566149359")
+        self.assertContains(self.client.get(reverse("storefront:account")), 'value="+919566149359"')
+
+    def test_account_page_validates_mobile_and_new_user_can_open_it(self):
+        from .models import UserProfile
+        user = self.login_customer()
+        self.assertFalse(UserProfile.objects.filter(user=user).exists())
+        self.assertEqual(self.client.get(reverse("storefront:account")).status_code, 200)
+        response = self.client.post(reverse("storefront:account"), {"phone": "9999999999"})
+        self.assertContains(response, "real mobile number")
+        self.client.post(reverse("storefront:account"), {"phone": "098765 12345"})
+        self.assertEqual(UserProfile.objects.get(user=user).phone, "+919876512345")
+
+    def test_checkout_prefills_profile_mobile_when_no_saved_address(self):
+        from .models import UserProfile
+        user = self.login_customer()
+        UserProfile.objects.create(user=user, phone="+919566149359")
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
+        page = self.client.get(reverse("storefront:checkout")).content.decode()
+        self.assertRegex(page, r'<input[^>]*name="phone"[^>]*value="\+919566149359"')
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings
@@ -1550,10 +1592,10 @@ class AccountPageTests(TestCase):
         self.assertTrue(UserProfile.objects.filter(user=self.user).exists())
 
     def test_post_updates_phone_number(self):
-        response = self.client.post(self.url, {"phone": "9876543210"}, follow=True)
+        response = self.client.post(self.url, {"phone": "9566149359"}, follow=True)
         self.assertEqual(response.status_code, 200)
         profile = UserProfile.objects.get(user=self.user)
-        self.assertEqual(profile.phone, "9876543210")
+        self.assertEqual(profile.phone, "+919566149359")
 
     def test_password_change_view_renders(self):
         response = self.client.get(reverse("password_change"))

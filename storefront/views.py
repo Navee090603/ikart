@@ -1057,6 +1057,7 @@ def signup(request):
             request.session["pending_registration"] = {
                 "username": form.cleaned_data["username"],
                 "email": form.cleaned_data["email"],
+                "phone": form.cleaned_data["phone"],
                 "password_hash": make_password(form.cleaned_data["password1"]),
                 "code_hash": code_hash,
                 "expires_at": expires_at.isoformat(),
@@ -1111,6 +1112,7 @@ def verify_email(request):
                     return redirect("storefront:login")
                 user = User(username=pending["username"], email=pending["email"], password=pending["password_hash"])
                 user.save()
+                UserProfile.objects.create(user=user, phone=pending.get("phone", ""))
                 request.session.pop("pending_registration", None)
                 login(request, user)
                 messages.success(request, "Your email has been verified. Welcome to IKart!")

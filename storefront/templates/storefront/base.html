@@ -136,6 +136,7 @@
     const validators = {
       required: (value) => value.trim() !== '',
       email: (value) => value === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value),
+      mobile: (value) => value === '' || /^(?:\+91|91|0)?[6-9]\d{9}$/.test(value.replace(/[\s\-().]/g, '')),
       minlength: (value) => value === '' || value.length >= 8,
       notnumeric: (value) => value === '' || !/^\d+$/.test(value),
       notalpha: (value) => value === '' || !/^[A-Za-z]+$/.test(value),
@@ -145,6 +146,7 @@
     const messages = {
       required: 'This field is required.',
       email: 'Enter a valid email address.',
+      mobile: 'Enter a valid 10-digit Indian mobile number (starting with 6, 7, 8 or 9).',
       minlength: 'Must be at least 8 characters.',
       match: 'Passwords do not match.',
       notnumeric: "This password can't be entirely numeric.",

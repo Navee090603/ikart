@@ -22,6 +22,11 @@
         <p id="{{ form.email.id_for_label }}_error" class="ik-error{% if not form.email.errors %} hidden{% endif %}">{{ form.email.errors.0 }}</p>
       </div>
       <div class="ik-field">
+        <label for="{{ form.phone.id_for_label }}">Mobile number</label>
+        {{ form.phone }}
+        <p id="{{ form.phone.id_for_label }}_error" class="ik-error{% if not form.phone.errors %} hidden{% endif %}">{{ form.phone.errors.0 }}</p>
+      </div>
+      <div class="ik-field">
         <label for="{{ form.password1.id_for_label }}">Password</label>
         <div class="ik-pw">
           {{ form.password1 }}
