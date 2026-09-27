@@ -1507,6 +1507,13 @@ class SecurityHeaderTests(TestCase):
         self.assertIn("default-src 'self'", response["Content-Security-Policy"])
         self.assertIn("frame-ancestors 'none'", response["Content-Security-Policy"])
 
+    def test_pages_use_built_tailwind_css_not_the_cdn(self):
+        response = self.client.get(reverse("storefront:home"))
+        page = response.content.decode()
+        self.assertNotIn("cdn.tailwindcss.com", page)
+        self.assertIn("storefront/css/tailwind.", page)
+        self.assertNotIn("cdn.tailwindcss.com", response["Content-Security-Policy"])
+
 
 @override_settings(DEBUG=False, ALLOWED_HOSTS=["testserver"])
 class CustomErrorPageTests(TestCase):
