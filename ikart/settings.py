@@ -52,7 +52,7 @@ if SITE_URL and not SITE_URL.startswith(("http://", "https://")):
 
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
-    "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
+    "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles", "django.contrib.sitemaps",
     "cloudinary", "cloudinary_storage", "anymail", "storefront",
 ]
 MIDDLEWARE = [

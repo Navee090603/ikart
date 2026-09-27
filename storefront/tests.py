@@ -1055,6 +1055,46 @@ class ShoppingFlowTests(TestCase):
             response = self.client.post(reverse("storefront:toggle_wishlist", args=[self.product.id]), {"next": next_url})
             self.assertEqual(response["Location"], expected or self.product.get_absolute_url(), next_url)
 
+    def test_pages_have_description_and_canonical_without_query(self):
+        page = self.client.get(reverse("storefront:product_list"), {"sort": "price_low", "q": "mug"}).content.decode()
+        self.assertRegex(page, r'<meta name="description" content="[^"]{20,}">')
+        self.assertIn('<link rel="canonical" href="http://testserver/shop/">', page)
+        product_page = self.client.get(self.product.get_absolute_url()).content.decode()
+        self.assertIn('<meta name="description" content="Ceramic mug">', product_page)
+
+    def test_product_page_has_structured_data_that_cannot_break_out(self):
+        self.product.name = 'Mug </script><script>alert(1)</script>'
+        self.product.save()
+        user = self.login_customer()
+        Review.objects.create(product=self.product, user=user, rating=4, title="ok", body="ok")
+        page = self.client.get(self.product.get_absolute_url()).content.decode()
+        self.assertNotIn("<script>alert(1)</script>", page)
+        block = re.search(r'<script type="application/ld\+json">(.*?)</script>', page, re.S).group(1)
+        data = json.loads(block)
+        self.assertEqual(data["@type"], "Product")
+        self.assertEqual(data["name"], self.product.name)
+        self.assertEqual(data["offers"]["price"], "299.00")
+        self.assertEqual(data["offers"]["priceCurrency"], "INR")
+        self.assertEqual(data["offers"]["availability"], "https://schema.org/InStock")
+        self.assertEqual(data["aggregateRating"]["reviewCount"], 1)
+
+    def test_robots_txt_and_sitemap(self):
+        robots = self.client.get("/robots.txt")
+        self.assertEqual(robots.status_code, 200)
+        self.assertEqual(robots["Content-Type"], "text/plain")
+        body = robots.content.decode()
+        self.assertIn("Disallow: /checkout/", body)
+        self.assertIn("Sitemap: http://testserver/sitemap.xml", body)
+        self.assertNotIn("staff", body)  # never advertise the admin address
+        hidden = Product.objects.create(category=self.product.category, name="Hidden", short_description="x",
+                                        description="x", price="1", stock=1, is_active=False)
+        sitemap = self.client.get("/sitemap.xml")
+        self.assertEqual(sitemap.status_code, 200)
+        xml = sitemap.content.decode()
+        self.assertIn(f"http://testserver{self.product.get_absolute_url()}", xml)
+        self.assertNotIn(hidden.get_absolute_url(), xml)
+        self.assertIn("http://testserver/returns/", xml)
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings

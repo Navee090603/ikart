@@ -1,6 +1,8 @@
 {% extends 'storefront/base.html' %}{% load storefront_extras %}
 
 {% block title %}{{ product.name }} | IKart{% endblock %}
+{% block meta_description %}{{ product.short_description }}{% endblock %}
+{% block extra_head %}{% product_json_ld %}{% endblock %}
 
 {% block content %}
 <div class="ik-page flex flex-col gap-12">

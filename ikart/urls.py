@@ -8,7 +8,10 @@ from django.contrib.auth import views as auth_views
 
 from storefront.forms import ChangePasswordForm, LoginForm
 from storefront.ratelimit import rate_limit
-from storefront.views import health_check
+from django.contrib.sitemaps.views import sitemap
+
+from storefront.sitemaps import SITEMAPS
+from storefront.views import health_check, robots_txt
 
 # The admin has its own login form (not django.contrib.auth's), so it needs
 # its own rate limit rather than reusing the one on /accounts/login/.
@@ -18,6 +21,8 @@ admin.site.login = rate_limit("admin_login", limit=15, period_seconds=300)(admin
 
 urlpatterns = [
     path("healthz/", health_check, name="health_check"),
+    path("robots.txt", robots_txt, name="robots_txt"),
+    path("sitemap.xml", sitemap, {"sitemaps": SITEMAPS}, name="django.contrib.sitemaps.views.sitemap"),
     path(settings.ADMIN_URL, admin.site.urls),
     path(
         "accounts/login/",

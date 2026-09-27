@@ -51,6 +51,21 @@ def health_check(request):
     return HttpResponse("ok", status=200)
 
 
+ROBOTS_DISALLOW = (
+    "/cart/", "/checkout/", "/payment/", "/payments/", "/order/", "/orders/", "/account/", "/accounts/",
+    "/addresses/", "/wishlist/", "/saved-for-later/", "/notification-preferences/", "/support/",
+    "/signup/", "/verify-email/", "/password-reset/", "/chat/", "/dashboard/",
+)
+
+
+@require_GET
+def robots_txt(request):
+    # The admin path is deliberately not listed: robots.txt is public.
+    lines = ["User-agent: *", *(f"Disallow: {path}" for path in ROBOTS_DISALLOW),
+             f"Sitemap: {request.build_absolute_uri('/sitemap.xml')}"]
+    return HttpResponse("\n".join(lines) + "\n", content_type="text/plain")
+
+
 RESET_EMAILS_PER_ADDRESS_PER_HOUR = 3
 
 
