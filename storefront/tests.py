@@ -737,6 +737,29 @@ class ShoppingFlowTests(TestCase):
         self.assertEqual(order.status, Order.Status.CANCELLED)
         self.assertEqual(order.payment_status, "cancelled")
 
+    def test_cod_payment_is_marked_paid_when_delivered(self):
+        order = Order.objects.create(
+            email="b@example.com", full_name="B", phone="9999999999", address_line1="1 Main", city="Pune",
+            state="Maharashtra", postal_code="411001", payment_method="cod", subtotal="299", total="299",
+        )
+        for status in (Order.Status.SHIPPED, Order.Status.OUT_FOR_DELIVERY):
+            order.status = status
+            order.save(update_fields=["status", "updated_at"])
+            order.refresh_from_db()
+            self.assertEqual(order.payment_status, "pending")
+        order.status = Order.Status.DELIVERED
+        order.save(update_fields=["status", "updated_at"])
+        order.refresh_from_db()
+        self.assertEqual(order.payment_status, "paid")
+
+    def test_delivery_does_not_touch_online_or_settled_payment_status(self):
+        online = Order.objects.create(
+            email="b@example.com", full_name="B", phone="9999999999", address_line1="1 Main", city="Pune",
+            state="Maharashtra", postal_code="411001", payment_method="razorpay", payment_status="paid_manual_review",
+            subtotal="299", total="299", status=Order.Status.DELIVERED,
+        )
+        self.assertEqual(online.payment_status, "paid_manual_review")
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings

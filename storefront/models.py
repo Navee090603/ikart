@@ -212,11 +212,18 @@ class Order(models.Model):
     def save(self, *args, **kwargs):
         if not self.number:
             self.number = f"IK{uuid4().hex[:10].upper()}"
-        if self.status == self.Status.DELIVERED and not self.delivered_at:
-            self.delivered_at = timezone.now()
+        if self.status == self.Status.DELIVERED:
+            changed = []
+            if not self.delivered_at:
+                self.delivered_at = timezone.now()
+                changed.append("delivered_at")
+            if self.payment_method == self.PaymentMethod.COD and self.payment_status == "pending":
+                # The courier collects cash on delivery.
+                self.payment_status = "paid"
+                changed.append("payment_status")
             update_fields = kwargs.get("update_fields")
-            if update_fields is not None:
-                kwargs["update_fields"] = {*update_fields, "delivered_at"}
+            if changed and update_fields is not None:
+                kwargs["update_fields"] = {*update_fields, *changed}
         super().save(*args, **kwargs)
 
     @property

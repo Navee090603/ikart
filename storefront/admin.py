@@ -592,7 +592,7 @@ class OrderRequestInline(admin.TabularInline):
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = ("number", "full_name", "total", "discount_amount", "payment_method", "payment_status", "status", "created_at")
-    list_filter = ("status", "payment_method", "created_at")
+    list_filter = ("status", "payment_method", "payment_status", "created_at")
     search_fields = ("number", "full_name", "email")
     readonly_fields = ("number", "subtotal", "delivery_fee", "total")
     inlines = [OrderItemInline, ShipmentInline, OrderRequestInline]
