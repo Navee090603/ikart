@@ -12,7 +12,9 @@ STORE_FACTS = """\
 - Returns: within 7 days of delivery. Items must be unused/unworn, unwashed, with original tags and packaging. \
 To start one: Order History (/orders/) → open the order → "Request return" (shown for 7 days after delivery). \
 There are no exchanges; customers return the item and place a new order. \
-Refunds go to the original payment method after the returned item passes inspection. There is no fixed refund timeline to promise.
+Refunds go to the original payment method (after the returned item passes inspection, for returns). \
+Once a refund is processed, banks usually credit it within 5–7 working days; the customer gets the refund reference and \
+bank reference (ARN) by email and on the order page, and can quote the ARN to their bank if it hasn't arrived.
 - Damaged or wrong item: apologise and ask the customer to contact support (/support/) with their order number.
 - Cancellation: request it from Order History before the order ships. Shipped orders cannot be cancelled.
 - Delivery: Standard 3–5 days, always free on every order. Express 1–2 days, flat ₹99.

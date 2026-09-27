@@ -1185,6 +1185,13 @@ class ShoppingFlowTests(TestCase):
         for expected in ("\u20b9348.00", "rfnd_xyz", "74332216123456789012345", "5\u20137 working days"):
             self.assertIn(expected, page)
 
+    def test_lux_refund_timeline_matches_customer_emails(self):
+        from .services import REFUND_TIMELINE
+        from .services.lux_prompt import build_system_prompt
+        self.assertIn("5\u20137 working days", REFUND_TIMELINE)
+        self.assertIn("5\u20137 working days", build_system_prompt())
+        self.assertIn("ARN", build_system_prompt())
+
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
         from django.conf import settings
