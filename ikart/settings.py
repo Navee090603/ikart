@@ -174,6 +174,7 @@ except InvalidOperation:
 AI_PROVIDER = env("AI_PROVIDER", default="claude")
 CLAUDE_API_KEY = env("CLAUDE_API_KEY", default="")
 GROQ_API_KEY = env("GROQ_API_KEY", default="")
+GROQ_MODEL = env("GROQ_MODEL", default="openai/gpt-oss-20b")
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
 OLLAMA_BASE_URL = env("OLLAMA_BASE_URL", default="http://localhost:11434")
 

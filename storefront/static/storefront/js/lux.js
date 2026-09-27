@@ -124,7 +124,8 @@ class LuxChatbot {
     this.showTypingIndicator();
 
     try {
-      const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+        || document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
       const response = await fetch('/chat/', {
         method: 'POST',
         headers: {
@@ -137,28 +138,20 @@ class LuxChatbot {
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
       this.removeTypingIndicator();
 
-      if (!response.ok) {
-        const errorMsg = data.error || data.reply || 'HTTP ' + response.status;
-        console.error('Lux HTTP error:', errorMsg);
-        this.addMessage('bot', 'Error: ' + errorMsg);
-      } else if (data.error) {
-        console.error('Lux API error:', data.error);
-        this.addMessage('bot', 'Error: ' + data.error);
-      } else if (data.reply) {
+      if (response.ok && data && data.reply) {
         this.addMessage('bot', data.reply);
-        if (data.session_id) {
-          this.updateSessionId(data.session_id);
-        }
+        if (data.session_id) this.updateSessionId(data.session_id);
       } else {
-        this.addMessage('bot', 'No response received');
+        console.error('Lux error:', response.status, data);
+        this.addMessage('bot', 'Sorry, I could not answer that right now. Please try again, or visit Help & support.');
       }
     } catch (error) {
       console.error('Lux fetch error:', error);
       this.removeTypingIndicator();
-      this.addMessage('bot', 'Network error: ' + error.message);
+      this.addMessage('bot', 'I could not reach the server. Please check your connection and try again.');
     } finally {
       this.isLoading = false;
       document.getElementById('lux-input').focus();

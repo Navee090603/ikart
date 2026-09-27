@@ -3,9 +3,12 @@ Lux - IKart's AI Shopping Assistant
 Provider-agnostic chatbot orchestrator that works with any LLM backend.
 """
 
+import logging
 from typing import Optional
 from django.conf import settings
 from .ai_providers import get_ai_provider
+
+logger = logging.getLogger(__name__)
 
 
 class LuxChatbot:
@@ -26,10 +29,9 @@ class LuxChatbot:
 
         elif self.provider_name == "groq":
             api_key = getattr(settings, "GROQ_API_KEY", "")
-            print(f"DEBUG: GROQ_API_KEY from settings: {api_key[:20] if api_key else 'NOT SET'}...")
             if not api_key:
-                raise ValueError("GROQ_API_KEY not configured in settings. Please set GROQ_API_KEY environment variable on Render.")
-            return get_ai_provider("groq", api_key=api_key)
+                raise ValueError("GROQ_API_KEY not configured in settings")
+            return get_ai_provider("groq", api_key=api_key, model=settings.GROQ_MODEL)
 
         elif self.provider_name == "openai":
             api_key = getattr(settings, "OPENAI_API_KEY", "")
@@ -68,7 +70,7 @@ class LuxChatbot:
             return response or "I'm thinking... Let me connect you with our support team instead."
         except Exception as e:
             # Graceful fallback for any provider errors
-            print(f"Lux error: {str(e)}")
+            logger.exception("Lux provider error")
             return "Oops! Something went wrong. Our support team would love to help: /support/"
 
 
