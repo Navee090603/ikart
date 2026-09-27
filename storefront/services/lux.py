@@ -26,8 +26,9 @@ class LuxChatbot:
 
         elif self.provider_name == "groq":
             api_key = getattr(settings, "GROQ_API_KEY", "")
+            print(f"DEBUG: GROQ_API_KEY from settings: {api_key[:20] if api_key else 'NOT SET'}...")
             if not api_key:
-                raise ValueError("GROQ_API_KEY not configured in settings")
+                raise ValueError("GROQ_API_KEY not configured in settings. Please set GROQ_API_KEY environment variable on Render.")
             return get_ai_provider("groq", api_key=api_key)
 
         elif self.provider_name == "openai":
