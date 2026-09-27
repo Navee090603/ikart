@@ -234,8 +234,16 @@ class SupportTicketForm(forms.ModelForm):
             self.fields["order"].queryset = user.orders.all()
 
 
+MAX_CSV_UPLOAD_BYTES = 2 * 1024 * 1024
+
+
+def validate_csv_size(upload):
+    if upload.size > MAX_CSV_UPLOAD_BYTES:
+        raise forms.ValidationError("This file is too large. CSV imports are limited to 2 MB; split it into smaller files.")
+
+
 class ProductCSVUploadForm(forms.Form):
-    csv_file = forms.FileField(help_text="CSV columns: name, category, price, stock, description. Optional: brand, short_description, compare_at_price, low_stock_threshold, is_featured, is_active.")
+    csv_file = forms.FileField(validators=[validate_csv_size], help_text="CSV columns: name, category, price, stock, description. Optional: brand, short_description, compare_at_price, low_stock_threshold, is_featured, is_active.")
 
 
 class MarketingPreferenceForm(forms.ModelForm):
@@ -259,4 +267,4 @@ class ReviewForm(forms.ModelForm):
 
 
 class CategoryCSVUploadForm(forms.Form):
-    csv_file = forms.FileField()
+    csv_file = forms.FileField(validators=[validate_csv_size])

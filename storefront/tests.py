@@ -1236,10 +1236,10 @@ class ProductCSVImportAdminTests(TestCase):
         self.client.force_login(self.admin_user)
         self.url = reverse("admin:storefront_product_upload_csv")
 
-    def _upload(self, csv_text):
+    def _upload(self, csv_text, follow=False):
         from django.core.files.uploadedfile import SimpleUploadedFile
         csv_file = SimpleUploadedFile("products.csv", csv_text.encode("utf-8"), content_type="text/csv")
-        return self.client.post(self.url, {"csv_file": csv_file})
+        return self.client.post(self.url, {"csv_file": csv_file}, follow=follow)
 
     def test_variant_with_hyphenated_sku_is_imported_correctly(self):
         from .models import ProductVariant
@@ -1316,19 +1316,73 @@ class ProductCSVImportAdminTests(TestCase):
         from .models import ProductImage
         mock_response = mock_get.return_value
         mock_response.raise_for_status.return_value = None
+        mock_response.is_redirect = False
         mock_response.headers = {"Content-Type": "image/png"}
-        mock_response.raw.read.return_value = b"fake-image-bytes"
+        mock_response.raw.read.return_value = self.png_bytes()
         csv_text = (
             "name,category,price,stock,description,images\n"
             "Mug,Home,299,5,A mug,https://example.com/mug.png\n"
         )
-        self._upload(csv_text)
+        with patch("storefront.admin.socket.getaddrinfo", return_value=self.public_address()):
+            self._upload(csv_text)
         image = ProductImage.objects.get(product__name="Mug")
         # The stored file name should not simply be the raw URL, and it should
         # contain the bytes we "downloaded", not just reference the remote URL.
         self.assertNotEqual(image.image.name, "https://example.com/mug.png")
-        self.assertEqual(image.image.read(), b"fake-image-bytes")
+        self.assertEqual(image.image.read(), self.png_bytes())
         image.image.delete(save=False)
+
+    @staticmethod
+    def png_bytes():
+        from io import BytesIO
+        from PIL import Image
+        buffer = BytesIO()
+        Image.new("RGB", (2, 2), "red").save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    @staticmethod
+    def public_address():
+        import socket
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", 443))]
+
+    def test_oversized_csv_upload_is_rejected(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        big = "name,category,price,stock,description\n" + ("x,y,1,1,z\n" * 300_000)
+        response = self.client.post(self.url, {"csv_file": SimpleUploadedFile("big.csv", big.encode(), content_type="text/csv")})
+        self.assertContains(response, "too large")
+        self.assertFalse(Product.objects.filter(name="x").exists())
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    @patch("storefront.admin.requests.get")
+    def test_non_image_download_is_rejected_and_existing_photos_are_kept(self, mock_get):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from .models import ProductImage
+        self._upload("name,category,price,stock,description\nMug,Home,299,5,A mug\n")
+        product = Product.objects.get(name="Mug")
+        original = ProductImage.objects.create(product=product, image=SimpleUploadedFile("orig.png", self.png_bytes()))
+        mock_response = mock_get.return_value
+        mock_response.status_code = 200
+        mock_response.is_redirect = False
+        mock_response.headers = {"Content-Type": "text/html"}
+        mock_response.raw.read.return_value = b"<html>Not found</html>"
+        with patch("storefront.admin.socket.getaddrinfo", return_value=self.public_address()):
+            response = self._upload("name,category,price,stock,description,images\nMug,Home,299,5,A mug,https://example.com/missing.png\n", follow=True)
+        self.assertContains(response, "not a valid image")
+        self.assertEqual(list(ProductImage.objects.filter(product=product)), [original])
+        original.image.delete(save=False)
+
+    @patch("storefront.admin.requests.get")
+    def test_internal_image_addresses_are_never_fetched(self, mock_get):
+        import socket
+        for url, address in (("http://127.0.0.1/x.png", "127.0.0.1"), ("http://169.254.169.254/latest", "169.254.169.254"),
+                             ("http://internal.example/x.png", "10.1.2.3")):
+            with patch("storefront.admin.socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 80))]):
+                response = self._upload(f"name,category,price,stock,description,images\nMug,Home,299,5,A mug,{url}\n", follow=True)
+            self.assertContains(response, "not allowed")
+        mock_get.assert_not_called()
 
 
 class AccountPageTests(TestCase):

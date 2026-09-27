@@ -1,9 +1,13 @@
 import csv
+import ipaddress
 import logging
+import socket
 from decimal import Decimal, InvalidOperation
-from io import TextIOWrapper
+from io import BytesIO, TextIOWrapper
+from urllib.parse import urljoin, urlparse
 
 import requests
+from PIL import Image
 from django import forms
 from django.core.files.base import ContentFile
 
@@ -368,7 +372,8 @@ class ProductAdmin(admin.ModelAdmin):
                             self.message_user(
                                 request,
                                 f"Successfully imported {imported_count} of {len(rows)} product(s)."
-                                + (f" {len(errors)} issue(s) reported below." if errors else ""),
+                                # The redirect drops the form, so the issues must travel in the message.
+                                + (f" {len(errors)} issue(s): " + " | ".join(errors[:5]) if errors else ""),
                                 messages.SUCCESS if not errors else messages.WARNING
                             )
 
@@ -454,8 +459,7 @@ class ProductAdmin(admin.ModelAdmin):
 
         if row["images"]:
 
-            ProductImage.objects.filter(product=product).delete()
-
+            downloaded = []
             image_list = row["images"].split("|")
 
             for index, image_url in enumerate(image_list):
@@ -481,6 +485,12 @@ class ProductAdmin(admin.ModelAdmin):
                     )
                     continue
 
+                downloaded.append((index, filename, content))
+
+            # Keep the existing photos unless at least one replacement actually downloaded.
+            if downloaded:
+                ProductImage.objects.filter(product=product).delete()
+            for index, filename, content in downloaded:
                 image = ProductImage(
                     product=product,
                     alt_text=product.name,
@@ -550,9 +560,31 @@ class ProductAdmin(admin.ModelAdmin):
                     continue
 
     @staticmethod
-    def _fetch_image(image_url, timeout=10, max_bytes=10 * 1024 * 1024):
+    def _check_public_url(url):
+        """Refuse URLs that resolve to loopback, private, link-local or other non-public addresses."""
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError("Image URL must be an http:// or https:// address.")
+        try:
+            addresses = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), proto=socket.IPPROTO_TCP)
+        except OSError as exc:
+            raise ValueError(f"Could not resolve {parsed.hostname}.") from exc
+        for address in addresses:
+            if not ipaddress.ip_address(address[4][0]).is_global:
+                raise ValueError("Image URL points to an internal network address, which is not allowed.")
+
+    @classmethod
+    def _fetch_image(cls, image_url, timeout=10, max_bytes=10 * 1024 * 1024, max_redirects=3):
         """Download a remote image and return (filename, ContentFile) ready for an ImageField."""
-        response = requests.get(image_url, timeout=timeout, stream=True)
+        url = image_url
+        for _ in range(max_redirects + 1):
+            cls._check_public_url(url)  # checked on every hop, so a redirect can't reach an internal host
+            response = requests.get(url, timeout=timeout, stream=True, allow_redirects=False)
+            if not response.is_redirect:
+                break
+            url = urljoin(url, response.headers.get("Location", ""))
+        else:
+            raise ValueError("Image URL redirects too many times.")
         response.raise_for_status()
 
         content_length = response.headers.get("Content-Length")
@@ -563,11 +595,16 @@ class ProductAdmin(admin.ModelAdmin):
         if len(data) > max_bytes:
             raise ValueError("Image exceeds maximum allowed size")
 
+        try:
+            with Image.open(BytesIO(data)) as picture:
+                picture.verify()
+                image_format = (picture.format or "jpeg").lower()
+        except Exception as exc:
+            raise ValueError("The downloaded file is not a valid image.") from exc
+
         filename = image_url.rstrip("/").split("/")[-1].split("?")[0] or "image"
         if "." not in filename:
-            content_type = response.headers.get("Content-Type", "")
-            ext = content_type.split("/")[-1].split(";")[0] if "/" in content_type else "jpg"
-            filename = f"{filename}.{ext}"
+            filename = f"{filename}.{'jpg' if image_format == 'jpeg' else image_format}"
 
         return filename, ContentFile(data)
 
