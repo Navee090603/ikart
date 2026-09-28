@@ -207,12 +207,25 @@ def product_detail(request, slug):
         key=lambda review: (review.user_id not in purchased_user_ids, -review.created_at.timestamp()),
     )
     questions = [question for question in product.questions.all() if question.is_published]
+
+    # Group variants by primary attribute for button display
+    variant_groups = {}
+    if product.primary_variant_attribute and product.variants.exists():
+        for variant in product.variants.all():
+            attr_value = getattr(variant, product.primary_variant_attribute, "")
+            if attr_value:
+                if attr_value not in variant_groups:
+                    variant_groups[attr_value] = {"ids": [], "has_stock": False}
+                variant_groups[attr_value]["ids"].append(str(variant.id))
+                if variant.stock > 0:
+                    variant_groups[attr_value]["has_stock"] = True
+
     return render(request, "storefront/product_detail.html", {
         "product": product, "question_form": ProductQuestionForm(),
         "reviews": reviews, "questions": questions,
         "purchased_user_ids": purchased_user_ids, "has_purchased": request.user.id in purchased_user_ids,
         "is_wishlisted": is_wishlisted, "frequently_bought": frequently_bought_together(product),
-        "also_viewed": customers_also_viewed(product),
+        "also_viewed": customers_also_viewed(product), "variant_groups": variant_groups,
     })
 
 
