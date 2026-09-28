@@ -72,18 +72,32 @@ Each product page has an image gallery, the discount against the original price,
 - Delivery is Standard (3–5 days, free) or Express (1–2 days, ₹99).
 - Payment is cash on delivery, or card/UPI on a Razorpay-hosted payment page.
 
-<p align="center"><img src="docs/screenshots/cart-desktop.png" alt="Cart with order summary" width="900"></p>
+<table>
+  <tr>
+    <td><img src="docs/screenshots/cart-desktop.png" alt="Cart with order summary"></td>
+    <td><img src="docs/screenshots/checkout-desktop.png" alt="Checkout with delivery details and order summary"></td>
+  </tr>
+</table>
 
 ### Orders, returns and refunds
 
-- Each order page shows a progress tracker: Order placed → Shipped → Out for delivery → Delivered. Below it are the shipment's tracking events.
+- Each order page shows a progress tracker: Order placed → Shipped → Out for delivery → Delivered. Once the order ships, the carrier's tracking events appear below it.
 - Customers can ask to cancel before an order ships, or request a return within 7 days of delivery.
 - When staff approve a return, the refund goes back through Razorpay. The order page and the confirmation email show the refund amount and the refund reference, plus the bank's reference number (ARN) when the bank provides one.
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/order-tracking-desktop.png" alt="Order page with progress tracker"></td>
+    <td><img src="docs/screenshots/order-history-desktop.png" alt="Order history"></td>
+  </tr>
+</table>
+
+<sub>Signed-in screenshots come from a test account. Its email, phone number, address and payment reference are covered with solid blocks.</sub>
 
 ### Accounts
 
 - New accounts confirm their email with a 6-digit code before they're created.
-- Sign-up asks for an Indian mobile number and checks its format. It's stored in `+91` format and used as the default at checkout.
+- Sign-up asks for an Indian mobile number and checks its format. It's stored in `+91` format and filled in at checkout when there's no saved address.
 - Also included: password reset and change, a wishlist, saved-for-later, saved addresses, email preferences and support tickets.
 
 ### Lux, the shopping assistant
@@ -123,6 +137,11 @@ Every page works on small screens. On phones, filters fold into a single "Filter
     <td><img src="docs/screenshots/listing-mobile.png" alt="Listing on mobile" width="200"></td>
     <td><img src="docs/screenshots/product-detail-mobile.png" alt="Product page on mobile" width="200"></td>
     <td><img src="docs/screenshots/cart-mobile.png" alt="Cart on mobile" width="200"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/checkout-mobile.png" alt="Checkout on mobile" width="200"></td>
+    <td><img src="docs/screenshots/order-tracking-mobile.png" alt="Order tracking on mobile" width="200"></td>
+    <td><img src="docs/screenshots/order-history-mobile.png" alt="Order history on mobile" width="200"></td>
   </tr>
 </table>
 
