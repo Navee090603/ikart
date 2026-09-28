@@ -782,6 +782,15 @@ class ShoppingFlowTests(TestCase):
         self.client.post(reverse("storefront:add_to_cart", args=[dress.id]), {"quantity": 1, "variant": small.id})
         self.assertEqual(list(self.client.session["cart"]), [f"{dress.id}:{small.id}"])
 
+    def test_invalid_or_foreign_option_is_rejected(self):
+        from .models import ProductVariant
+        dress, small = self.sized_product()
+        other = ProductVariant.objects.create(product=self.product, size="L", sku="MUG-L", stock=3)
+        for bad in ("abc", str(other.id), "999999"):
+            response = self.client.post(reverse("storefront:add_to_cart", args=[dress.id]), {"quantity": 1, "variant": bad}, follow=True)
+            self.assertContains(response, "That option is not available")
+        self.assertFalse(self.client.session.get("cart"))
+
     def colour_sized_product(self):
         from .models import ProductVariant
         dress = Product.objects.create(
@@ -824,15 +833,6 @@ class ShoppingFlowTests(TestCase):
         page = self.client.get(dress.get_absolute_url()).content.decode()
         self.assertIn('data-value="S"', page)
         self.assertNotIn('id="variant-secondary"', page)
-
-    def test_invalid_or_foreign_option_is_rejected(self):
-        from .models import ProductVariant
-        dress, small = self.sized_product()
-        other = ProductVariant.objects.create(product=self.product, size="L", sku="MUG-L", stock=3)
-        for bad in ("abc", str(other.id), "999999"):
-            response = self.client.post(reverse("storefront:add_to_cart", args=[dress.id]), {"quantity": 1, "variant": bad}, follow=True)
-            self.assertContains(response, "That option is not available")
-        self.assertFalse(self.client.session.get("cart"))
 
     def test_cart_item_missing_a_required_size_is_removed_before_checkout(self):
         dress, small = self.sized_product()
