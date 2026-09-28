@@ -75,17 +75,24 @@
           {% if product.primary_variant_attribute and variant_groups %}
           {# Button grid for primary variant attribute #}
           <div>
-            <label class="block mb-3"><strong>Select {{ product.primary_variant_attribute|title }}</strong></label>
-            <div class="ik-variant-buttons flex flex-wrap gap-2" data-attribute="{{ product.primary_variant_attribute }}">
+            <p id="variant-primary-label" class="block mb-3"><strong>Select {{ product.primary_variant_attribute|title }}</strong></p>
+            <div id="variant-primary-buttons" class="ik-variant-buttons flex flex-wrap gap-2" role="group" aria-labelledby="variant-primary-label" data-label="{{ product.primary_variant_attribute }}">
               {% for attr_value in variant_groups.keys %}
               {% with variant_data=variant_groups|dict_get:attr_value %}
-              <button type="button" class="ik-variant-btn" data-variant-ids="{{ variant_data.ids|join:',' }}" data-attr-value="{{ attr_value }}" {% if not variant_data.has_stock %}disabled{% endif %}>
+              <button type="button" class="ik-variant-btn" data-value="{{ attr_value }}" aria-pressed="false" {% if not variant_data.has_stock %}disabled{% endif %}>
                 {{ attr_value }}
               </button>
               {% endwith %}
               {% endfor %}
             </div>
-            <p id="variant-error" class="ik-error hidden mt-2">Please select a {{ product.primary_variant_attribute }}</p>
+            {% if secondary_variant_attribute %}
+            <div id="variant-secondary" class="mt-4" hidden>
+              <p id="variant-secondary-label" class="block mb-3"><strong>Select {{ secondary_variant_attribute|title }}</strong></p>
+              <div id="variant-secondary-buttons" class="ik-variant-buttons flex flex-wrap gap-2" role="group" aria-labelledby="variant-secondary-label" data-label="{{ secondary_variant_attribute }}"></div>
+            </div>
+            {% endif %}
+            {{ variant_options|json_script:"variant-options" }}
+            <p id="variant-error" class="ik-error hidden mt-2" role="alert"></p>
           </div>
           {% else %}
           {# Fallback to dropdown for products without primary_variant_attribute #}
@@ -248,37 +255,66 @@
     if (!form) return;
 
     const variantInput = document.getElementById('variant-id');
-    const variantButtonsContainer = document.querySelector('.ik-variant-buttons');
+    const primaryButtons = document.getElementById('variant-primary-buttons');
+    if (!primaryButtons) return;
 
-    if (!variantButtonsContainer) return;
+    // Every variant as {id, primary, secondary, stock}; the chosen pair maps to one id.
+    const options = JSON.parse(document.getElementById('variant-options').textContent);
+    const secondaryWrap = document.getElementById('variant-secondary');
+    const secondaryButtons = document.getElementById('variant-secondary-buttons');
+    const errorMsg = document.getElementById('variant-error');
+    let chosenPrimary = null;
 
-    const variantButtons = variantButtonsContainer.querySelectorAll('.ik-variant-btn');
+    const markSelected = (group, button) => {
+      group.querySelectorAll('.ik-variant-btn').forEach(b => {
+        b.classList.toggle('active', b === button);
+        b.setAttribute('aria-pressed', String(b === button));
+      });
+      errorMsg.classList.add('hidden');
+    };
 
-    variantButtons.forEach(button => {
-      button.addEventListener('click', function (e) {
-        e.preventDefault();
-        if (this.disabled) return;
+    const showSecondary = (matches) => {
+      const buttons = matches.map(option => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ik-variant-btn';
+        button.textContent = option.secondary;
+        button.disabled = option.stock <= 0;
+        button.setAttribute('aria-pressed', 'false');
+        button.addEventListener('click', () => {
+          variantInput.value = option.id;
+          markSelected(secondaryButtons, button);
+        });
+        return button;
+      });
+      secondaryButtons.replaceChildren(...buttons);
+      secondaryWrap.hidden = false;
+      const inStock = matches.filter(option => option.stock > 0);
+      if (matches.length === 1 && inStock.length === 1) buttons[0].click();
+    };
 
-        const variantIds = this.dataset.variantIds.split(',');
-        if (variantIds.length === 0) return;
-
-        const selectedVariantId = variantIds[0];
-        variantInput.value = selectedVariantId;
-
-        variantButtons.forEach(btn => btn.classList.remove('active'));
-        this.classList.add('active');
-
-        const errorMsg = document.getElementById('variant-error');
-        if (errorMsg) errorMsg.classList.add('hidden');
+    primaryButtons.querySelectorAll('.ik-variant-btn').forEach(button => {
+      button.addEventListener('click', () => {
+        if (button.disabled) return;
+        chosenPrimary = button.dataset.value;
+        variantInput.value = '';
+        markSelected(primaryButtons, button);
+        const matches = options.filter(option => option.primary === chosenPrimary);
+        if (secondaryWrap && matches.some(option => option.secondary)) {
+          showSecondary(matches.filter(option => option.secondary));
+        } else {
+          const pick = matches.find(option => option.stock > 0);
+          variantInput.value = pick ? pick.id : '';
+        }
       });
     });
 
-    form.addEventListener('submit', function (e) {
-      if (!variantInput.value) {
-        e.preventDefault();
-        const errorMsg = document.getElementById('variant-error');
-        if (errorMsg) errorMsg.classList.remove('hidden');
-      }
+    form.addEventListener('submit', (e) => {
+      if (variantInput.value) return;
+      e.preventDefault();
+      const missing = chosenPrimary && secondaryWrap ? secondaryButtons : primaryButtons;
+      errorMsg.textContent = `Please select a ${missing.dataset.label}.`;
+      errorMsg.classList.remove('hidden');
     });
   });
 </script>

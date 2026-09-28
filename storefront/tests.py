@@ -813,6 +813,49 @@ class ShoppingFlowTests(TestCase):
             self.assertContains(response, "That option is not available")
         self.assertFalse(self.client.session.get("cart"))
 
+    def colour_sized_product(self):
+        from .models import ProductVariant
+        dress = Product.objects.create(
+            category=self.product.category, name="Tiered dress", short_description="Dress", description="Dress",
+            price="999", stock=0, primary_variant_attribute="size",
+        )
+        variants = {
+            (size, colour): ProductVariant.objects.create(product=dress, size=size, color=colour, sku=f"TD-{size}-{colour}", stock=stock)
+            for size, colour, stock in (("M", "Red", 2), ("M", "Blue", 0), ("M", "Green", 3), ("L", "Red", 0))
+        }
+        return dress, variants
+
+    def test_size_buttons_expose_every_colour_so_each_variant_can_be_chosen(self):
+        import json
+        import re
+        dress, variants = self.colour_sized_product()
+        page = self.client.get(dress.get_absolute_url()).content.decode()
+        options = json.loads(re.search(r'<script id="variant-options" type="application/json">(.*?)</script>', page).group(1))
+        self.assertCountEqual(options, [
+            {"id": variant.id, "primary": size, "secondary": colour, "stock": variant.stock}
+            for (size, colour), variant in variants.items()
+        ])
+        self.assertIn("Select Color", page)
+        self.assertRegex(page, r'data-value="M"\s+aria-pressed="false"\s*>')  # M has stock
+        self.assertRegex(page, r'data-value="L"\s+aria-pressed="false"\s+disabled')  # L only in a sold-out colour
+
+    def test_second_colour_of_a_size_can_be_added_to_cart(self):
+        dress, variants = self.colour_sized_product()
+        green = variants[("M", "Green")]
+        self.client.post(reverse("storefront:add_to_cart", args=[dress.id]), {"quantity": 1, "variant": green.id})
+        self.assertEqual(list(self.client.session["cart"]), [f"{dress.id}:{green.id}"])
+        blue = variants[("M", "Blue")]
+        response = self.client.post(reverse("storefront:add_to_cart", args=[dress.id]), {"quantity": 1, "variant": blue.id}, follow=True)
+        self.assertContains(response, "That quantity is not currently in stock.")
+
+    def test_size_only_product_has_no_colour_step(self):
+        dress, small = self.sized_product()
+        dress.primary_variant_attribute = "size"
+        dress.save(update_fields=["primary_variant_attribute"])
+        page = self.client.get(dress.get_absolute_url()).content.decode()
+        self.assertIn('data-value="S"', page)
+        self.assertNotIn('id="variant-secondary"', page)
+
     def test_cart_item_missing_a_required_size_is_removed_before_checkout(self):
         dress, small = self.sized_product()
         self.login_customer()

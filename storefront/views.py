@@ -192,6 +192,9 @@ def search_autocomplete(request):
     return JsonResponse({"results": list(matches)})
 
 
+SECONDARY_VARIANT_ATTRIBUTE = {"size": "color", "color": "size"}
+
+
 def product_detail(request, slug):
     release_expired_reservations_if_due()
     run_daily_cleanup_if_due()
@@ -208,17 +211,25 @@ def product_detail(request, slug):
     )
     questions = [question for question in product.questions.all() if question.is_published]
 
-    # Group variants by primary attribute for button display
+    # Primary-attribute buttons (e.g. size), plus every variant with its second attribute
+    # (e.g. colour) so the page can resolve the chosen pair to one variant.
+    primary = product.primary_variant_attribute
+    secondary = SECONDARY_VARIANT_ATTRIBUTE.get(primary, "")
     variant_groups = {}
-    if product.primary_variant_attribute and product.variants.exists():
+    variant_options = []
+    if primary:
         for variant in product.variants.all():
-            attr_value = getattr(variant, product.primary_variant_attribute, "")
-            if attr_value:
-                if attr_value not in variant_groups:
-                    variant_groups[attr_value] = {"ids": [], "has_stock": False}
-                variant_groups[attr_value]["ids"].append(str(variant.id))
-                if variant.stock > 0:
-                    variant_groups[attr_value]["has_stock"] = True
+            value = getattr(variant, primary, "")
+            if not value:
+                continue
+            group = variant_groups.setdefault(value, {"has_stock": False})
+            group["has_stock"] = group["has_stock"] or variant.stock > 0
+            variant_options.append({
+                "id": variant.id, "primary": value,
+                "secondary": getattr(variant, secondary) if secondary else "", "stock": variant.stock,
+            })
+    if not any(option["secondary"] for option in variant_options):
+        secondary = ""
 
     return render(request, "storefront/product_detail.html", {
         "product": product, "question_form": ProductQuestionForm(),
@@ -226,6 +237,7 @@ def product_detail(request, slug):
         "purchased_user_ids": purchased_user_ids, "has_purchased": request.user.id in purchased_user_ids,
         "is_wishlisted": is_wishlisted, "frequently_bought": frequently_bought_together(product),
         "also_viewed": customers_also_viewed(product), "variant_groups": variant_groups,
+        "variant_options": variant_options, "secondary_variant_attribute": secondary,
     })
 
 
