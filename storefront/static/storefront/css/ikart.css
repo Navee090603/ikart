@@ -416,7 +416,7 @@ a.ik-sr:focus { position: fixed; left: 16px; top: 16px; width: auto; height: aut
   cursor: pointer; transition: all 0.15s ease;
   min-width: 48px; text-align: center;
 }
-.ik-variant-btn:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+.ik-variant-btn:hover:not(:disabled):not(.active) { border-color: var(--brand); color: var(--brand); }
 .ik-variant-btn:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 .ik-variant-btn.active { background: var(--brand); color: var(--on-brand); border-color: var(--brand); }
 .ik-variant-btn:disabled { opacity: 0.5; cursor: not-allowed; }

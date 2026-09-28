@@ -1707,6 +1707,17 @@ class SecurityHeaderTests(TestCase):
         self.assertIn("storefront/css/tailwind.", page)
         self.assertNotIn("cdn.tailwindcss.com", response["Content-Security-Policy"])
 
+    def test_selected_size_button_keeps_its_label_on_hover(self):
+        # The hover rule recolours text to --brand; on the selected button (brand
+        # background) that hid the label, so hover styles must skip .active.
+        import re
+        from pathlib import Path
+        css = (Path(__file__).parent / "static/storefront/css/ikart.css").read_text()
+        hover_selectors = re.findall(r"([^{}]*\.ik-variant-btn:hover[^{]*)\{", css)
+        self.assertTrue(hover_selectors)
+        for selector in hover_selectors:
+            self.assertIn(":not(.active)", selector)
+
 
 @override_settings(DEBUG=False, ALLOWED_HOSTS=["testserver"])
 class CustomErrorPageTests(TestCase):
