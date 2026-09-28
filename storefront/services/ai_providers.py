@@ -1,6 +1,7 @@
 """
-Abstract AI provider interface and concrete implementations for Lux chatbot.
-Allows swapping between Claude API, Groq, OpenAI, Ollama, etc. without code changes.
+AI provider interface for the Lux chatbot.
+Groq (default) and Claude are implemented; settings.AI_PROVIDER picks one.
+OpenAIProvider and OllamaProvider are placeholders that raise NotImplementedError.
 """
 
 from abc import ABC, abstractmethod
@@ -87,7 +88,7 @@ class GroqProvider(AIProvider):
 
 
 class OpenAIProvider(AIProvider):
-    """OpenAI ChatGPT implementation (stub for future migration)."""
+    """Placeholder only: not implemented, raises NotImplementedError."""
 
     def __init__(self, api_key: str):
         raise NotImplementedError("OpenAI provider not yet implemented.")
@@ -97,7 +98,7 @@ class OpenAIProvider(AIProvider):
 
 
 class OllamaProvider(AIProvider):
-    """Local Ollama implementation for self-hosted LLM (stub for future migration)."""
+    """Placeholder only: not implemented, raises NotImplementedError."""
 
     def __init__(self, base_url: str = "http://localhost:11434"):
         raise NotImplementedError("Ollama provider not yet implemented.")

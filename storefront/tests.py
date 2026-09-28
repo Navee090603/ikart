@@ -1843,3 +1843,12 @@ class ConfigurationDocsTests(TestCase):
         self.assertIn("AI_PROVIDER", render_keys)
         for name in set(env_example) | set(render_keys):
             self.assertIn(f'"{name}"', settings_source, f"{name} is documented but settings.py never reads it")
+
+
+class AIProviderTests(TestCase):
+    def test_openai_and_ollama_are_placeholders(self):
+        from .services.ai_providers import GroqProvider, get_ai_provider
+        self.assertIsInstance(get_ai_provider("groq", api_key="test-key"), GroqProvider)
+        for name, kwargs in (("openai", {"api_key": "test-key"}), ("ollama", {})):
+            with self.assertRaises(NotImplementedError):
+                get_ai_provider(name, **kwargs)

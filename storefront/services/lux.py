@@ -1,6 +1,6 @@
 """
 Lux - IKart's AI Shopping Assistant
-Provider-agnostic chatbot orchestrator that works with any LLM backend.
+Chatbot orchestrator; settings.AI_PROVIDER selects Groq (default) or Claude.
 """
 
 import logging
