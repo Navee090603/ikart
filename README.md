@@ -9,7 +9,7 @@
   <a href="https://ikart-sg.onrender.com"><img alt="Live demo" src="https://img.shields.io/badge/live_demo-ikart--sg.onrender.com-C2462B"></a>
   <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white">
   <img alt="Django 5.2" src="https://img.shields.io/badge/django-5.2-092E20?logo=django&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-112-2E7355">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-123_passing-2E7355">
 </p>
 
 <p align="center">
@@ -56,21 +56,19 @@ What makes this build interesting:
 
 ### Product pages and variants
 
-Each product page has:
+Each product page has an image gallery, the discount against the original price, and a live stock count.
 
-- an image gallery, the discount against the original price, and live stock
-- customer reviews, with a "Verified purchase" badge for buyers
-- product questions and answers
-- two recommendation rows built from real behaviour: **Goes well with** (bought together) and **You might like** (viewed together)
+- **Sizes and colours.** Sizes appear as buttons. Picking a size shows the colours that size comes in, and the chosen pair adds exactly that variant to the cart. A size that comes in one colour selects it automatically. Sizes or colours with no stock left are greyed out.
+- **Per-product setup.** For each product, staff choose whether sizes or colours come first. Products without either keep a simple dropdown.
+- **Stock you can trust.** For products sold in sizes and colours, the stock count is the total across those options, which is the same stock orders take from. The product shows as out of stock only when every option has sold out.
+- **Recommendations.** Rows based on real shopping behaviour: **Goes well with** (bought together) and **You might like** (viewed together).
 
-Sizes and other options appear as buttons, and sold-out options are greyed out. Staff choose which attribute becomes the buttons for each product (size today; any variant field works). Products without one keep a dropdown.
-
-<p align="center"><img src="docs/screenshots/product-detail-desktop.png" alt="Product page with size buttons" width="900"></p>
+<p align="center"><img src="docs/screenshots/product-detail-desktop.png" alt="Product page with size and colour buttons" width="900"></p>
 
 ### Cart and checkout
 
 - The cart is kept in the session, so guests can shop freely. Checkout asks them to sign in or create an account, and their cart comes with them.
-- Checkout takes coupon codes and saved addresses, and fills in the mobile number from the shopper's profile.
+- Checkout takes coupon codes and saved addresses. If the shopper has no saved address, it fills in the mobile number from their profile.
 - Delivery is Standard (3–5 days, free) or Express (1–2 days, ₹99).
 - Payment is cash on delivery, or card/UPI on a Razorpay-hosted payment page.
 
@@ -96,7 +94,7 @@ Lux is a chat widget on every page. Each message goes to the model with:
 - the catalogue products that match the question, with their in-stock sizes
 - for order questions from signed-in shoppers, their own recent orders
 
-It is told to recommend only products from that list, to link to real pages, and to reply in the shopper's language. The default provider is Groq (`openai/gpt-oss-20b`), and Claude is a supported alternative.
+It is told to recommend only products from that list, to link to real pages, and to reply in the shopper's language. The default provider is Groq (`openai/gpt-oss-20b`). Claude works as an alternative: set `AI_PROVIDER=claude` and `CLAUDE_API_KEY`.
 
 <table>
   <tr>
@@ -117,7 +115,7 @@ Staff get:
 
 ## On mobile
 
-Every page is designed for small screens first. On phones, filters fold into a single "Filters & sort" panel, and the size buttons grow to be easy to tap.
+Every page works on small screens. On phones, filters fold into a single "Filters & sort" panel, and the size buttons grow to be easy to tap.
 
 <table>
   <tr>
@@ -157,7 +155,7 @@ Every page is designed for small screens first. On phones, filters fold into a s
 | **Media and static files** | Cloudinary, WhiteNoise |
 | **Payments** | Razorpay Payment Links and webhooks |
 | **Email** | Brevo via django-anymail |
-| **AI** | Groq API, Anthropic SDK (Claude) |
+| **AI** | Groq API (default), Anthropic Python SDK 1.x for Claude |
 | **Hosting** | Render (Singapore) |
 
 ## Project structure
@@ -207,7 +205,7 @@ python manage.py runserver
 **Tests:**
 
 ```bash
-python manage.py test storefront
+python manage.py test
 ```
 
 **Environment variables** go in `.env`. The full list is in [`.env.example`](.env.example). The main ones:
@@ -230,13 +228,13 @@ python manage.py release_stale_payment_reservations
 
 ## Deploying on Render
 
-`render.yaml` describes a free Python web service:
+`render.yaml` describes the free Python web service `ikart-sg`:
 
 - **Build:** `./build.sh` installs requirements, compiles Tailwind, runs `collectstatic` and applies migrations.
 - **Start:** `gunicorn ikart.wsgi:application`, which picks up `gunicorn.conf.py` automatically.
 - **Health check:** `/healthz/`, which also confirms the database responds.
 
-Set the environment variables above in the Render dashboard. `GROQ_API_KEY` isn't listed in `render.yaml`, so add it by hand. The database is external, set through `DATABASE_URL`; the live site uses Neon.
+`render.yaml` sets `DEBUG=False`, generates `SECRET_KEY`, and lists the other variables above with `sync: false`, so you enter their values in the Render dashboard. Add `CLAUDE_API_KEY` yourself only if you switch Lux to Claude. The database is external, set through `DATABASE_URL`; the live site uses Neon.
 
 For payments, add a Razorpay webhook pointing at `https://<your-domain>/payments/razorpay/webhook/`. Subscribe it to these events:
 
