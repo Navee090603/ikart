@@ -1846,6 +1846,23 @@ class ConfigurationDocsTests(TestCase):
 
 
 class AIProviderTests(TestCase):
+    def test_claude_provider_can_be_created(self):
+        from .services.ai_providers import ClaudeProvider, get_ai_provider
+        provider = get_ai_provider("claude", api_key="test-key", model="claude-haiku-4-5-20251001")
+        self.assertIsInstance(provider, ClaudeProvider)
+        self.assertEqual(provider.model, "claude-haiku-4-5-20251001")
+
+    def test_claude_provider_returns_the_reply_text_without_a_network_call(self):
+        from types import SimpleNamespace
+        from .services.ai_providers import ClaudeProvider
+        provider = ClaudeProvider(api_key="test-key")
+        reply = SimpleNamespace(content=[SimpleNamespace(type="text", text="Here are three dresses.")])
+        with patch.object(provider.client.messages, "create", return_value=reply) as create:
+            self.assertEqual(provider.get_response("system prompt", "Show me dresses"), "Here are three dresses.")
+        kwargs = create.call_args.kwargs
+        self.assertEqual(kwargs["system"], "system prompt")
+        self.assertEqual(kwargs["messages"], [{"role": "user", "content": "Show me dresses"}])
+
     def test_openai_and_ollama_are_placeholders(self):
         from .services.ai_providers import GroqProvider, get_ai_provider
         self.assertIsInstance(get_ai_provider("groq", api_key="test-key"), GroqProvider)
