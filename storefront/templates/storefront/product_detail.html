@@ -1,4 +1,4 @@
-{% extends 'storefront/base.html' %}{% load storefront_extras %}
+{% extends 'storefront/base.html' %}{% load storefront_extras static %}
 
 {% block title %}{{ product.name }} | IKart{% endblock %}
 {% block meta_description %}{{ product.short_description }}{% endblock %}
@@ -67,9 +67,26 @@
         {% if product.short_description %}<p class="ik-lead">{{ product.short_description }}</p>{% endif %}
         <hr class="ik-rule">
 
-        <form method="post" action="{% url 'storefront:add_to_cart' product.id %}" class="ik-form flex flex-col gap-4">
+        <form method="post" action="{% url 'storefront:add_to_cart' product.id %}" class="ik-form flex flex-col gap-4" data-product-id="{{ product.id }}">
           {% csrf_token %}
           {% if product.variants.exists %}
+          <input type="hidden" id="variant-id" name="variant" required>
+
+          {% if product.primary_variant_attribute and variant_groups %}
+          {# Button grid for primary variant attribute #}
+          <div>
+            <label class="block mb-3"><strong>Select {{ product.primary_variant_attribute|title }}</strong></label>
+            <div class="ik-variant-buttons flex flex-wrap gap-2" data-attribute="{{ product.primary_variant_attribute }}">
+              {% for attr_value, variant_data in variant_groups.items %}
+              <button type="button" class="ik-variant-btn" data-variant-ids="{{ variant_data.ids|join:',' }}" data-attr-value="{{ attr_value }}" {% if not variant_data.has_stock %}disabled{% endif %}>
+                {{ attr_value }}
+              </button>
+              {% endfor %}
+            </div>
+            <p id="variant-error" class="ik-error hidden mt-2">Please select a {{ product.primary_variant_attribute }}</p>
+          </div>
+          {% else %}
+          {# Fallback to dropdown for products without primary_variant_attribute #}
           <div>
             <label for="variant-select">Select option</label>
             <select id="variant-select" name="variant" required>
@@ -80,6 +97,7 @@
               {% endfor %}
             </select>
           </div>
+          {% endif %}
           {% endif %}
 
           <div class="flex flex-wrap items-end gap-3">
@@ -221,5 +239,45 @@
     document.getElementById("mainProductImage").src = url;
     document.querySelectorAll(".ik-gallery-thumb").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
   }
+
+  // Variant button selection
+  document.addEventListener('DOMContentLoaded', function () {
+    const form = document.querySelector('form[data-product-id]');
+    if (!form) return;
+
+    const variantInput = document.getElementById('variant-id');
+    const variantButtonsContainer = document.querySelector('.ik-variant-buttons');
+
+    if (!variantButtonsContainer) return;
+
+    const variantButtons = variantButtonsContainer.querySelectorAll('.ik-variant-btn');
+
+    variantButtons.forEach(button => {
+      button.addEventListener('click', function (e) {
+        e.preventDefault();
+        if (this.disabled) return;
+
+        const variantIds = this.dataset.variantIds.split(',');
+        if (variantIds.length === 0) return;
+
+        const selectedVariantId = variantIds[0];
+        variantInput.value = selectedVariantId;
+
+        variantButtons.forEach(btn => btn.classList.remove('active'));
+        this.classList.add('active');
+
+        const errorMsg = document.getElementById('variant-error');
+        if (errorMsg) errorMsg.classList.add('hidden');
+      });
+    });
+
+    form.addEventListener('submit', function (e) {
+      if (!variantInput.value) {
+        e.preventDefault();
+        const errorMsg = document.getElementById('variant-error');
+        if (errorMsg) errorMsg.classList.remove('hidden');
+      }
+    });
+  });
 </script>
 {% endblock %}

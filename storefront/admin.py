@@ -68,6 +68,14 @@ class ProductAdmin(admin.ModelAdmin):
         "slug": ("name",)
     }
 
+    fieldsets = (
+        ("Basic Info", {"fields": ("name", "slug", "brand", "category", "short_description", "description")}),
+        ("Pricing & Stock", {"fields": ("price", "compare_at_price", "stock", "low_stock_threshold")}),
+        ("Variants", {"fields": ("primary_variant_attribute",), "description": "Which variant attribute to display as buttons (e.g. size, color, storage)"}),
+        ("Status", {"fields": ("is_active", "is_featured")}),
+        ("Specifications", {"fields": ("specifications",), "classes": ("collapse",)}),
+    )
+
     change_list_template = "admin/storefront/product/change_list.html"
 
     inlines = [

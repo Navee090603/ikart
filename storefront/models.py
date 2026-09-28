@@ -60,6 +60,11 @@ class Product(models.Model):
     low_stock_threshold = models.PositiveIntegerField(default=5)
     is_featured = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+    primary_variant_attribute = models.CharField(
+        max_length=40,
+        blank=True,
+        help_text="Which variant attribute to display as buttons (e.g. size, color, storage, material). Leave blank to use dropdown.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
