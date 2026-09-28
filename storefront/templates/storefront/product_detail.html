@@ -77,12 +77,10 @@
           <div>
             <label class="block mb-3"><strong>Select {{ product.primary_variant_attribute|title }}</strong></label>
             <div class="ik-variant-buttons flex flex-wrap gap-2" data-attribute="{{ product.primary_variant_attribute }}">
-              {% for attr_value in variant_groups.keys %}
-              {% with variant_data=variant_groups|dict_get:attr_value %}
+              {% for attr_value, variant_data in variant_groups.items %}
               <button type="button" class="ik-variant-btn" data-variant-ids="{{ variant_data.ids|join:',' }}" data-attr-value="{{ attr_value }}" {% if not variant_data.has_stock %}disabled{% endif %}>
                 {{ attr_value }}
               </button>
-              {% endwith %}
               {% endfor %}
             </div>
             <p id="variant-error" class="ik-error hidden mt-2">Please select a {{ product.primary_variant_attribute }}</p>
