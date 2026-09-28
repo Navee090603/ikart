@@ -24,7 +24,15 @@ class ShoppingFlowTests(TestCase):
             description="A sturdy everyday mug.", price="299.00", stock=5, is_featured=True,
         )
 
-    def test_guest_can_add_to_cart_and_place_cod_order(self):
+    def test_guest_must_sign_in_to_check_out_and_keeps_cart(self):
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 2})
+        response = self.client.get(reverse("storefront:checkout"))
+        self.assertRedirects(response, f"{reverse('login')}?next={reverse('storefront:checkout')}", fetch_redirect_response=False)
+        self.assertFalse(Order.objects.exists())
+        self.login_customer()
+        self.assertEqual(sum(item["quantity"] for item in self.client.session["cart"].values()), 2)
+
+    def test_signed_in_customer_can_place_cod_order(self):
         self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 2})
         response = self.client.post(reverse("storefront:checkout"), self.checkout_data())
         self.assertEqual(response.status_code, 302)
@@ -42,7 +50,7 @@ class ShoppingFlowTests(TestCase):
     def test_new_account_requires_email_otp_before_activation(self):
         response = self.client.post(reverse("storefront:signup"), {
             "username": "newbuyer", "email": "newbuyer@example.com",
-            "password1": "Secur3Password!", "password2": "Secur3Password!",
+            "phone": "9566149359", "password1": "Secur3Password!", "password2": "Secur3Password!",
         })
         self.assertRedirects(response, reverse("storefront:verify_email"))
         self.assertFalse(User.objects.filter(username="newbuyer").exists())
@@ -56,7 +64,7 @@ class ShoppingFlowTests(TestCase):
     def test_pending_signup_can_resend_code_from_verification_page(self):
         self.client.post(reverse("storefront:signup"), {
             "username": "waiting", "email": "waiting@example.com",
-            "password1": "Secur3Password!", "password2": "Secur3Password!",
+            "phone": "9566149359", "password1": "Secur3Password!", "password2": "Secur3Password!",
         })
         response = self.client.post(reverse("storefront:resend_verification_code"))
         self.assertRedirects(response, reverse("storefront:verify_email"))
@@ -69,11 +77,13 @@ class ShoppingFlowTests(TestCase):
         self.assertEqual(len(mail.outbox), 2)
 
     def login_customer(self):
-        user = User.objects.create_user("customer", "customer@example.com", "Secur3Password!")
+        user = User.objects.filter(username="customer").first() or User.objects.create_user("customer", "customer@example.com", "Secur3Password!")
         self.client.login(username="customer", password="Secur3Password!")
         return user
 
     def checkout_token(self):
+        if "_auth_user_id" not in self.client.session:
+            self.login_customer()
         self.client.get(reverse("storefront:checkout"))
         return self.client.session["checkout_token"]
 
@@ -151,6 +161,14 @@ class ShoppingFlowTests(TestCase):
         self.client.login(username=staff.username, password="Secur3Password!")
         self.assertEqual(self.client.get(reverse("storefront:analytics_dashboard")).status_code, 200)
 
+    @override_settings(ROOT_URLCONF="storefront.tests_admin_urlconf")
+    def test_analytics_admin_link_follows_admin_url(self):
+        staff = User.objects.create_superuser("boss", "boss@example.com", "Secur3Password!")
+        self.client.force_login(staff)
+        page = self.client.get(reverse("storefront:analytics_dashboard")).content.decode()
+        self.assertIn('href="/staff-test/"', page)
+        self.assertNotIn('href="/admin/"', page)
+
     def test_coupon_quote_refreshes_and_checkout_recalculates_on_the_server(self):
         coupon = Coupon.objects.create(code="SAVE10", discount_type="percent", value="10", minimum_order_amount="100")
         self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 2})
@@ -162,13 +180,14 @@ class ShoppingFlowTests(TestCase):
         response = self.client.post(reverse("storefront:update_cart_quote"), {"key": cart_key, "quantity": 1})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["discount_amount"], "29.90")
-        self.assertEqual(response.json()["total"], "318.10")
+        self.assertEqual(response.json()["total"], "269.10")
         response = self.client.post(reverse("storefront:checkout"), self.checkout_data(coupon_code=coupon.code))
         order = Order.objects.get()
         self.assertRedirects(response, reverse("storefront:order_confirmation", args=[order.number]))
-        self.assertEqual(order.total, Decimal("318.10"))
+        self.assertEqual(order.total, Decimal("269.10"))
 
     def test_checkout_page_loads(self):
+        self.login_customer()
         self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
         response = self.client.get(reverse("storefront:checkout"))
         self.assertEqual(response.status_code, 200)
@@ -180,7 +199,7 @@ class ShoppingFlowTests(TestCase):
     def test_verified_online_payment_is_captured_once_and_clears_cart(self, client_class):
         fake_client = client_class.return_value
         fake_client.payment_link.create.return_value = self.payment_link_response()
-        fake_client.payment.fetch.return_value = {"id": "pay_test_123", "order_id": "order_test_123", "amount": 34800, "currency": "INR", "status": "captured"}
+        fake_client.payment.fetch.return_value = {"id": "pay_test_123", "order_id": "order_test_123", "amount": 29900, "currency": "INR", "status": "captured"}
         self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
         response = self.client.post(reverse("storefront:checkout"), self.checkout_data(payment_method="razorpay"))
         order = Order.objects.get()
@@ -497,23 +516,723 @@ class ShoppingFlowTests(TestCase):
         self.assertEqual(payment.provider_refund_id, "rfnd_new_1")
         self.assertEqual(result.pk, payment.pk)
 
-    def test_stale_payment_reservation_command_releases_stock(self):
+    def stale_online_order(self, **payment_fields):
         order = Order.objects.create(
             email="buyer@example.com", full_name="Buyer", phone="9999999999", address_line1="1 Main",
             city="Pune", state="Maharashtra", postal_code="411001", payment_method="razorpay",
-            subtotal="299", delivery_fee="49", total="348", status=Order.Status.PAYMENT_PENDING,
+            subtotal="299", total="299", status=Order.Status.PAYMENT_PENDING,
             payment_status="initiated", inventory_deducted=True,
         )
         OrderItem.objects.create(order=order, product=self.product, product_name=self.product.name, quantity=1, unit_price="299")
         self.product.stock = 4
         self.product.save(update_fields=["stock"])
-        payment = PaymentTransaction.objects.create(order=order, provider_order_id="order_stale_123", amount="348")
-        PaymentTransaction.objects.filter(pk=payment.pk).update(created_at=timezone.now() - timedelta(minutes=31))
+        payment = PaymentTransaction.objects.create(order=order, amount="299", **payment_fields)
+        PaymentTransaction.objects.filter(pk=payment.pk).update(created_at=timezone.now() - timedelta(minutes=40))
+        return order
+
+    @override_settings(RAZORPAY_KEY_ID="", RAZORPAY_KEY_SECRET="")
+    def test_stale_reservation_released_when_razorpay_not_configured(self):
+        order = self.stale_online_order(provider_order_id="order_stale_123")
         call_command("release_stale_payment_reservations", minutes=30)
         order.refresh_from_db()
         self.product.refresh_from_db()
         self.assertEqual(order.status, Order.Status.PAYMENT_FAILED)
         self.assertEqual(self.product.stock, 5)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret")
+    @patch("storefront.services.razorpay.Client")
+    def test_expired_payment_link_releases_stock(self, client_class):
+        client_class.return_value.payment_link.fetch.return_value = {"status": "expired", "payments": None}
+        order = self.stale_online_order(provider_payment_link_id="plink_old")
+        call_command("release_stale_payment_reservations", minutes=30)
+        order.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PAYMENT_FAILED)
+        self.assertEqual(self.product.stock, 5)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret")
+    @patch("storefront.services.razorpay.Client")
+    def test_unexpired_payment_link_is_cancelled_before_release(self, client_class):
+        client_class.return_value.payment_link.fetch.return_value = {"status": "created", "payments": None}
+        order = self.stale_online_order(provider_payment_link_id="plink_open")
+        call_command("release_stale_payment_reservations", minutes=30)
+        client_class.return_value.payment_link.cancel.assert_called_once_with("plink_open")
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PAYMENT_FAILED)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret")
+    @patch("storefront.services.razorpay.Client")
+    def test_paid_link_found_by_sweep_confirms_order_instead_of_cancelling(self, client_class):
+        fake = client_class.return_value
+        fake.payment_link.fetch.return_value = {"status": "paid", "payments": [{"payment_id": "pay_late", "status": "captured"}]}
+        fake.payment.fetch.return_value = {"id": "pay_late", "amount": 29900, "currency": "INR", "status": "captured"}
+        order = self.stale_online_order(provider_payment_link_id="plink_paid")
+        call_command("release_stale_payment_reservations", minutes=30)
+        order.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PLACED)
+        self.assertEqual(order.payment_status, "paid")
+        self.assertEqual(self.product.stock, 4)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret")
+    @patch("storefront.services.razorpay.Client")
+    def test_sweep_leaves_order_alone_when_razorpay_unreachable(self, client_class):
+        client_class.return_value.payment_link.fetch.side_effect = ConnectionError("down")
+        order = self.stale_online_order(provider_payment_link_id="plink_unknown")
+        call_command("release_stale_payment_reservations", minutes=30)
+        order.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PAYMENT_PENDING)
+        self.assertEqual(self.product.stock, 4)
+
+    @override_settings(RAZORPAY_KEY_ID="", RAZORPAY_KEY_SECRET="")
+    def test_shopping_pages_trigger_the_sweep(self):
+        order = self.stale_online_order(provider_order_id="order_stale_456")
+        self.client.get(reverse("storefront:cart"))
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PAYMENT_FAILED)
+
+    def delivered_order(self, user, days_ago):
+        order = Order.objects.create(
+            user=user, email=user.email, full_name="Customer", phone="9999999999", address_line1="1 Main",
+            city="Pune", state="Maharashtra", postal_code="411001", payment_method="cod",
+            subtotal="299", total="299", status=Order.Status.DELIVERED,
+        )
+        Order.objects.filter(pk=order.pk).update(delivered_at=timezone.now() - timedelta(days=days_ago))
+        order.refresh_from_db()
+        return order
+
+    def test_marking_delivered_records_delivery_time_once(self):
+        order = Order.objects.create(
+            email="b@example.com", full_name="B", phone="9999999999", address_line1="1 Main", city="Pune",
+            state="Maharashtra", postal_code="411001", payment_method="cod", subtotal="299", total="299",
+        )
+        self.assertIsNone(order.delivered_at)
+        order.status = Order.Status.DELIVERED
+        order.save(update_fields=["status", "updated_at"])
+        order.refresh_from_db()
+        first = order.delivered_at
+        self.assertIsNotNone(first)
+        order.save()
+        order.refresh_from_db()
+        self.assertEqual(order.delivered_at, first)
+
+    def test_return_allowed_within_seven_days_of_delivery(self):
+        user = self.login_customer()
+        order = self.delivered_order(user, days_ago=6)
+        self.assertTrue(order.can_request_return)
+        self.assertContains(self.client.get(reverse("storefront:order_confirmation", args=[order.number])), "Request return")
+        response = self.client.post(reverse("storefront:request_order_change", args=[order.number, "return"]), {"reason": "changed_mind", "note": ""})
+        self.assertEqual(response.status_code, 302)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.RETURN_REQUESTED)
+
+    def test_return_blocked_after_seven_days(self):
+        user = self.login_customer()
+        order = self.delivered_order(user, days_ago=8)
+        self.assertFalse(order.can_request_return)
+        self.assertNotContains(self.client.get(reverse("storefront:order_confirmation", args=[order.number])), "Request return</a>")
+        response = self.client.post(reverse("storefront:request_order_change", args=[order.number, "return"]), {"reason": "changed_mind", "note": ""}, follow=True)
+        self.assertContains(response, "return window for this order closed")
+        self.assertFalse(OrderRequest.objects.filter(order=order).exists())
+
+    def test_rejecting_requests_restores_previous_order_status(self):
+        from django.contrib import admin as django_admin
+        from django.test import RequestFactory
+        from .admin import OrderRequestAdmin
+        user = self.login_customer()
+        model_admin = OrderRequestAdmin(OrderRequest, django_admin.site)
+        http_request = RequestFactory().post("/")
+        cases = [
+            (Order.Status.CANCELLATION_REQUESTED, "cancellation", Order.Status.PLACED),
+            (Order.Status.RETURN_REQUESTED, "return", Order.Status.DELIVERED),
+        ]
+        for order_status, request_type, expected in cases:
+            order = self.delivered_order(user, days_ago=2)
+            Order.objects.filter(pk=order.pk).update(status=order_status)
+            order.refresh_from_db()
+            change = OrderRequest.objects.create(order=order, user=user, request_type=request_type, reason="changed_mind")
+            change.status = OrderRequest.Status.REJECTED
+            model_admin.save_model(http_request, change, None, True)
+            order.refresh_from_db()
+            self.assertEqual(order.status, expected)
+
+    def sign_up_and_verify(self, next_url):
+        self.client.post(f"{reverse('storefront:signup')}?next={next_url}", {
+            "username": "newbuyer", "email": "newbuyer@example.com",
+            "phone": "9566149359", "password1": "Secur3Password!", "password2": "Secur3Password!",
+        })
+        code = re.search(r"\b(\d{6})\b", mail.outbox[-1].body).group(1)
+        return self.client.post(reverse("storefront:verify_email"), {"code": code})
+
+    def test_new_account_created_from_checkout_returns_to_checkout(self):
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
+        response = self.sign_up_and_verify(reverse("storefront:checkout"))
+        self.assertRedirects(response, reverse("storefront:checkout"))
+        self.assertTrue(self.client.session["cart"])
+
+    def test_sign_up_ignores_off_site_next_url(self):
+        response = self.sign_up_and_verify("https://evil.example.com/")
+        self.assertRedirects(response, reverse("storefront:home"))
+
+    def test_guest_orders_are_claimed_when_owner_signs_in(self):
+        def make_order(email):
+            return Order.objects.create(
+                email=email, full_name="Guest", phone="9999999999", address_line1="1 Main", city="Pune",
+                state="Maharashtra", postal_code="411001", payment_method="cod", subtotal="299", total="299",
+            )
+        mine = make_order("Customer@Example.com")
+        someone_elses = make_order("other@example.com")
+        user = self.login_customer()
+        mine.refresh_from_db()
+        someone_elses.refresh_from_db()
+        self.assertEqual(mine.user, user)
+        self.assertIsNone(someone_elses.user)
+        self.assertContains(self.client.get(reverse("storefront:order_history")), mine.number)
+
+    def admin_cancel(self, order):
+        from django.contrib import admin as django_admin
+        from django.contrib.messages.storage.fallback import FallbackStorage
+        from django.test import RequestFactory
+        from .admin import OrderAdmin
+        request = RequestFactory().post("/")
+        request.session = self.client.session
+        request._messages = FallbackStorage(request)
+        order.status = Order.Status.CANCELLED
+        OrderAdmin(Order, django_admin.site).save_model(request, order, None, True)
+        order.refresh_from_db()
+        return [str(message) for message in request._messages]
+
+    def paid_online_order_with_coupon(self):
+        coupon = Coupon.objects.create(code="ONCE", discount_type="fixed", value="10", usage_limit=1)
+        order = Order.objects.create(
+            email="buyer@example.com", full_name="Buyer", phone="9999999999", address_line1="1 Main", city="Pune",
+            state="Maharashtra", postal_code="411001", payment_method="razorpay", payment_status="paid",
+            subtotal="299", total="289", status=Order.Status.PLACED, inventory_deducted=True, coupon=coupon,
+        )
+        OrderItem.objects.create(order=order, product=self.product, product_name=self.product.name, quantity=1, unit_price="299")
+        CouponRedemption.objects.create(coupon=coupon, order=order, discount_amount="10")
+        PaymentTransaction.objects.create(order=order, amount="289", status=PaymentTransaction.Status.CAPTURED, provider_payment_id="pay_1")
+        return order, coupon
+
+    @patch("storefront.admin.refund_captured_payment")
+    def test_admin_cancelling_paid_order_refunds_and_frees_coupon(self, refund):
+        order, coupon = self.paid_online_order_with_coupon()
+        refund.return_value = PaymentTransaction(order=order, amount="289", status=PaymentTransaction.Status.REFUND_PENDING)
+        self.admin_cancel(order)
+        refund.assert_called_once()
+        self.assertEqual(order.status, Order.Status.CANCELLED)
+        self.assertEqual(order.payment_status, "refund_pending")
+        self.assertFalse(CouponRedemption.objects.filter(order=order).exists())
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 6)
+
+    @patch("storefront.admin.refund_captured_payment", side_effect=RuntimeError("gateway down"))
+    def test_admin_cancel_keeps_status_when_refund_cannot_start(self, refund):
+        order, coupon = self.paid_online_order_with_coupon()
+        notices = self.admin_cancel(order)
+        self.assertEqual(order.status, Order.Status.PLACED)
+        self.assertEqual(order.payment_status, "paid")
+        self.assertTrue(CouponRedemption.objects.filter(order=order).exists())
+        self.assertTrue(any("Status not changed" in notice for notice in notices))
+
+    def test_admin_cancelling_cod_order_marks_payment_cancelled(self):
+        order = Order.objects.create(
+            email="buyer@example.com", full_name="Buyer", phone="9999999999", address_line1="1 Main", city="Pune",
+            state="Maharashtra", postal_code="411001", payment_method="cod", subtotal="299", total="299",
+        )
+        self.admin_cancel(order)
+        self.assertEqual(order.status, Order.Status.CANCELLED)
+        self.assertEqual(order.payment_status, "cancelled")
+
+    def test_cod_payment_is_marked_paid_when_delivered(self):
+        order = Order.objects.create(
+            email="b@example.com", full_name="B", phone="9999999999", address_line1="1 Main", city="Pune",
+            state="Maharashtra", postal_code="411001", payment_method="cod", subtotal="299", total="299",
+        )
+        for status in (Order.Status.SHIPPED, Order.Status.OUT_FOR_DELIVERY):
+            order.status = status
+            order.save(update_fields=["status", "updated_at"])
+            order.refresh_from_db()
+            self.assertEqual(order.payment_status, "pending")
+        order.status = Order.Status.DELIVERED
+        order.save(update_fields=["status", "updated_at"])
+        order.refresh_from_db()
+        self.assertEqual(order.payment_status, "paid")
+
+    def test_delivery_does_not_touch_online_or_settled_payment_status(self):
+        online = Order.objects.create(
+            email="b@example.com", full_name="B", phone="9999999999", address_line1="1 Main", city="Pune",
+            state="Maharashtra", postal_code="411001", payment_method="razorpay", payment_status="paid_manual_review",
+            subtotal="299", total="299", status=Order.Status.DELIVERED,
+        )
+        self.assertEqual(online.payment_status, "paid_manual_review")
+
+    def sized_product(self):
+        from .models import ProductVariant
+        dress = Product.objects.create(category=self.product.category, name="Wrap dress", short_description="Dress", description="Dress", price="999", stock=10)
+        small = ProductVariant.objects.create(product=dress, size="S", sku="DRESS-S", stock=3)
+        return dress, small
+
+    def test_sized_product_needs_a_size_to_be_added_to_cart(self):
+        dress, small = self.sized_product()
+        response = self.client.post(reverse("storefront:add_to_cart", args=[dress.id]), {"quantity": 1}, follow=True)
+        self.assertContains(response, "Please choose a size or option")
+        self.assertFalse(self.client.session.get("cart"))
+        self.client.post(reverse("storefront:add_to_cart", args=[dress.id]), {"quantity": 1, "variant": small.id})
+        self.assertEqual(list(self.client.session["cart"]), [f"{dress.id}:{small.id}"])
+
+    def test_invalid_or_foreign_option_is_rejected(self):
+        from .models import ProductVariant
+        dress, small = self.sized_product()
+        other = ProductVariant.objects.create(product=self.product, size="L", sku="MUG-L", stock=3)
+        for bad in ("abc", str(other.id), "999999"):
+            response = self.client.post(reverse("storefront:add_to_cart", args=[dress.id]), {"quantity": 1, "variant": bad}, follow=True)
+            self.assertContains(response, "That option is not available")
+        self.assertFalse(self.client.session.get("cart"))
+
+    def test_cart_item_missing_a_required_size_is_removed_before_checkout(self):
+        dress, small = self.sized_product()
+        self.login_customer()
+        session = self.client.session
+        session["cart"] = {f"{dress.id}:0": {"product_id": dress.id, "variant_id": None, "quantity": 1}}
+        session.save()
+        response = self.client.get(reverse("storefront:checkout"), follow=True)
+        self.assertContains(response, "no longer available and was removed")
+        self.assertFalse(Order.objects.exists())
+
+    def test_saved_item_without_size_cannot_move_to_cart(self):
+        dress, small = self.sized_product()
+        user = self.login_customer()
+        saved = SavedForLaterItem.objects.create(user=user, product=dress, quantity=1)
+        response = self.client.post(reverse("storefront:move_saved_item_to_cart", args=[saved.id]))
+        self.assertRedirects(response, dress.get_absolute_url(), fetch_redirect_response=False)
+        self.assertTrue(SavedForLaterItem.objects.filter(pk=saved.pk).exists())
+        self.assertFalse(self.client.session.get("cart"))
+
+    def test_lux_sees_matching_products_with_real_prices_sizes_and_links(self):
+        from .services.lux_context import relevant_products
+        dress, small = self.sized_product()
+        Product.objects.create(category=self.product.category, name="Silk dress", short_description="Silk", description="Silk", price="3000", stock=1)
+        block = relevant_products("Suggest a dress under 1500")
+        self.assertIn("Wrap dress | ₹999", block)
+        self.assertIn("sizes in stock: S", block)
+        self.assertIn(dress.get_absolute_url(), block)
+        self.assertNotIn("Silk dress", block)
+        self.assertNotIn("Coffee mug", block)
+        self.assertIsNone(relevant_products("What is your return policy?"))
+        self.assertIn("Wrap dress", relevant_products("ஒரு உடை வேண்டும்"))
+        self.assertEqual(relevant_products("dresses above 50000"), "No matching products are priced at least ₹50000.")
+
+    def test_lux_sees_only_the_signed_in_customers_orders(self):
+        from django.contrib.auth.models import AnonymousUser
+        from .services.lux_context import customer_orders
+        user = self.login_customer()
+        other = User.objects.create_user("other", "other@example.com", "Secur3Password!")
+        base = dict(full_name="C", phone="9999999999", address_line1="1 Main", city="Pune", state="Maharashtra",
+                    postal_code="411001", payment_method="cod", subtotal="299", total="299")
+        mine = Order.objects.create(user=user, email=user.email, status=Order.Status.SHIPPED, **base)
+        theirs = Order.objects.create(user=other, email=other.email, **base)
+        block = customer_orders(user, f"where are {mine.number} and {theirs.number}?")
+        self.assertIn(f"{mine.number} | placed", block)
+        self.assertIn("status: Shipped", block)
+        self.assertIn(f"/order/{mine.number}/", block)
+        self.assertNotIn(f"{theirs.number} | placed", block)
+        self.assertIn(f"Not found in this customer's account: {theirs.number}", block)
+        self.assertIn("not signed in", customer_orders(AnonymousUser(), "track my order"))
+        self.assertIsNone(customer_orders(user, "suggest a dress"))
+
+    @patch("storefront.services.lux.get_ai_provider")
+    def test_chat_endpoint_gives_lux_the_customers_orders(self, get_provider):
+        from .services import lux as lux_module
+        lux_module._lux_instance = None
+        self.addCleanup(setattr, lux_module, "_lux_instance", None)
+        provider = get_provider.return_value
+        provider.get_response.return_value = "It's on the way."
+        user = self.login_customer()
+        order = Order.objects.create(user=user, email=user.email, full_name="C", phone="9999999999", address_line1="1 Main",
+                                     city="Pune", state="Maharashtra", postal_code="411001", payment_method="cod",
+                                     subtotal="299", total="299")
+        with self.settings(AI_PROVIDER="groq", GROQ_API_KEY="test"):
+            response = self.client.post(reverse("storefront:chat_message"), data=json.dumps({"message": "where is my order?"}), content_type="application/json")
+        self.assertEqual(response.json()["reply"], "It's on the way.")
+        system_prompt = provider.get_response.call_args[0][0]
+        self.assertIn(order.number, system_prompt)
+
+    def start_online_checkout(self, fake_client, link_id):
+        fake_client.payment_link.create.return_value = self.payment_link_response(link_id)
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
+        response = self.client.post(reverse("storefront:checkout"), self.checkout_data(payment_method="razorpay"))
+        self.assertEqual(response["Location"], f"https://rzp.io/i/{link_id}")
+        return Order.objects.get(payment_transaction__provider_payment_link_id=link_id)
+
+    def webhook_capture(self, order):
+        from .services import mark_payment_captured
+        mark_payment_captured(order.payment_transaction, "pay_webhook", {"id": "pay_webhook", "amount": 29900})
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_CURRENCY="INR")
+    @patch("storefront.views.razorpay.Client")
+    def test_return_after_webhook_already_confirmed_still_clears_cart(self, client_class):
+        import hashlib
+        import hmac
+        order = self.start_online_checkout(client_class.return_value, "plink_race")
+        self.webhook_capture(order)
+        signature = hmac.new(b"secret", f"plink_race|{order.number}|paid|pay_webhook".encode(), hashlib.sha256).hexdigest()
+        response = self.client.get(reverse("storefront:razorpay_payment_link_callback", args=[order.number]), {
+            "razorpay_payment_link_id": "plink_race", "razorpay_payment_link_reference_id": order.number,
+            "razorpay_payment_link_status": "paid", "razorpay_payment_id": "pay_webhook", "razorpay_signature": signature,
+        })
+        self.assertRedirects(response, reverse("storefront:order_confirmation", args=[order.number]))
+        self.assertFalse(self.client.session.get("cart"))
+        self.assertNotIn("checkout_token", self.client.session)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_CURRENCY="INR")
+    @patch("storefront.views.razorpay.Client")
+    def test_next_checkout_is_not_sent_to_an_order_paid_via_webhook(self, client_class):
+        first = self.start_online_checkout(client_class.return_value, "plink_first")
+        self.webhook_capture(first)  # customer closed the tab; never returned from Razorpay
+        client_class.return_value.payment_link.create.return_value = self.payment_link_response("plink_second")
+        stale_form_token = self.client.session["checkout_token"]
+        response = self.client.post(reverse("storefront:checkout"), {
+            **self.checkout_data(payment_method="razorpay"), "checkout_token": stale_form_token,
+        })
+        self.assertEqual(response["Location"], "https://rzp.io/i/plink_second")
+        second = Order.objects.exclude(pk=first.pk).get()
+        self.assertEqual(second.status, Order.Status.PAYMENT_PENDING)
+        self.assertNotEqual(str(second.checkout_token), stale_form_token)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_CURRENCY="INR")
+    @patch("storefront.views.razorpay.Client")
+    def test_double_clicking_place_order_resumes_the_same_payment(self, client_class):
+        first = self.start_online_checkout(client_class.return_value, "plink_once")
+        response = self.client.post(reverse("storefront:checkout"), {
+            **self.checkout_data(payment_method="razorpay"), "checkout_token": str(first.checkout_token),
+        })
+        self.assertEqual(response["Location"], "https://rzp.io/i/plink_once")
+        self.assertEqual(Order.objects.count(), 1)
+
+    def add_card_products(self, count, reviewer):
+        for i in range(count):
+            product = Product.objects.create(
+                category=self.product.category, name=f"Card item {Product.objects.count()}", short_description="x",
+                description="x", price="100", stock=5, is_featured=True,
+            )
+            Review.objects.create(product=product, user=reviewer, rating=4, title="ok", body="ok")
+            WishlistItem.objects.create(user=reviewer, product=product)
+
+    def card_page_queries(self, url):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        with CaptureQueriesContext(connection) as queries:
+            self.assertEqual(self.client.get(url).status_code, 200)
+        return len(queries)
+
+    def test_product_card_pages_use_a_fixed_number_of_queries(self):
+        user = self.login_customer()
+        self.add_card_products(2, user)
+        for url in ("/", "/shop/", "/wishlist/"):
+            self.client.get(url)  # first home visit creates the default hero banner
+        before = {url: self.card_page_queries(url) for url in ("/", "/shop/", "/wishlist/")}
+        self.add_card_products(5, user)
+        after = {url: self.card_page_queries(url) for url in ("/", "/shop/", "/wishlist/")}
+        self.assertEqual(before, after)
+
+    def test_product_card_counts_only_approved_reviews(self):
+        user = self.login_customer()
+        other = User.objects.create_user("other", "other@example.com", "Secur3Password!")
+        Review.objects.create(product=self.product, user=user, rating=5, title="ok", body="ok")
+        Review.objects.create(product=self.product, user=other, rating=1, title="spam", body="spam", is_approved=False)
+        page = self.client.get(reverse("storefront:product_list")).content.decode()
+        self.assertIn("out of 5, 1 review<", page)
+        self.assertNotIn("2 reviews", page)
+
+    def assert_errors_linked_to_fields(self, response, expected_fields):
+        html = response.content.decode()
+        ids = set(re.findall(r'\bid="([^"]+)"', html))
+        for field_id in expected_fields:
+            tag = re.search(rf'<(?:input|textarea|select)[^>]*\bid="{field_id}"[^>]*>', html)
+            self.assertIsNotNone(tag, field_id)
+            self.assertIn('aria-invalid="true"', tag.group(0), field_id)
+            described = re.search(r'aria-describedby="([^"]+)"', tag.group(0))
+            self.assertIsNotNone(described, field_id)
+            for target in described.group(1).split():
+                self.assertIn(target, ids, f"{field_id} points to missing #{target}")
+                if target.endswith("_error"):
+                    error = re.search(rf'<p[^>]*\bid="{target}"[^>]*>([^<]*)', html)
+                    self.assertTrue(error and error.group(1).strip(), f"#{target} is empty")
+
+    def test_form_errors_are_linked_to_their_fields(self):
+        self.assert_errors_linked_to_fields(
+            self.client.post(reverse("login"), {"username": "", "password": ""}), ["id_username", "id_password"])
+        self.assert_errors_linked_to_fields(
+            self.client.post(reverse("storefront:password_reset"), {"email": "not-an-email"}), ["id_email"])
+        self.assert_errors_linked_to_fields(
+            self.client.post(reverse("storefront:signup"), {"username": "", "email": "bad", "password1": "", "password2": ""}),
+            ["id_username", "id_email", "id_password1"])
+        self.login_customer()
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
+        self.assert_errors_linked_to_fields(
+            self.client.post(reverse("storefront:checkout"), self.checkout_data(email="bad", full_name="", city="")),
+            ["id_email", "id_full_name", "id_city"])
+        self.assert_errors_linked_to_fields(
+            self.client.post(reverse("storefront:account"), {"phone": "x" * 200}), ["id_phone"])
+        self.assert_errors_linked_to_fields(
+            self.client.post(reverse("password_change"), {"old_password": "", "new_password1": "", "new_password2": ""}),
+            ["id_old_password", "id_new_password1", "id_new_password2"])
+
+    def add_related_products(self, count, buyer):
+        from .models import ProductImage, ProductView
+        for _ in range(count):
+            other = Product.objects.create(category=self.product.category, name=f"Related {Product.objects.count()}",
+                                           short_description="x", description="x", price="100", stock=5)
+            ProductImage.objects.create(product=other, image="products/x.jpg", alt_text="x")
+            order = Order.objects.create(user=buyer, email=buyer.email, full_name="B", phone="9999999999", address_line1="1",
+                                         city="Pune", state="MH", postal_code="411001", payment_method="cod",
+                                         subtotal="1", total="1", status=Order.Status.DELIVERED)
+            OrderItem.objects.create(order=order, product=self.product, product_name="m", quantity=1, unit_price="1")
+            OrderItem.objects.create(order=order, product=other, product_name="o", quantity=1, unit_price="1")
+            session = f"s{other.pk}"
+            ProductView.objects.create(product=self.product, session_key=session)
+            ProductView.objects.create(product=other, session_key=session)
+
+    def test_product_page_query_count_does_not_grow_with_related_products(self):
+        buyer = User.objects.create_user("buyer", "buyer@example.com", "Secur3Password!")
+        url = self.product.get_absolute_url()
+        self.add_related_products(1, buyer)
+        self.client.get(url)
+        before = self.card_page_queries(url)
+        self.add_related_products(3, buyer)
+        page = self.client.get(url).content.decode()
+        self.assertEqual(page.count("products/x.jpg"), 8)  # 4 related products in both rows
+        self.assertEqual(self.card_page_queries(url), before)
+
+    @patch("storefront.services.lux.get_ai_provider")
+    def test_lux_reply_links_are_cleaned_of_invisible_and_lookalike_characters(self, get_provider):
+        from .services import lux as lux_module
+        lux_module._lux_instance = None
+        self.addCleanup(setattr, lux_module, "_lux_instance", None)
+        get_provider.return_value.get_response.return_value = (
+            "Try the Nike Air Max Runner \u2013 \u20b95999 \u2013 /\u200bproduct/nike\u2011air\u2011max\u2011runner/\ufeff"
+        )
+        with self.settings(AI_PROVIDER="groq", GROQ_API_KEY="test"):
+            reply = self.client.post(reverse("storefront:chat_message"), data=json.dumps({"message": "shoes?"}),
+                                     content_type="application/json").json()["reply"]
+        self.assertIn("/product/nike-air-max-runner/", reply)
+        self.assertNotIn("\u200b", reply)
+        self.assertNotIn("\ufeff", reply)
+        self.assertIn("\u2013 \u20b95999", reply)  # ordinary dashes in the prose are left alone
+
+        get_provider.return_value.get_response.return_value = "\u0915\u094d\u200d\u0937"  # Hindi half-form uses ZWJ
+        with self.settings(AI_PROVIDER="groq", GROQ_API_KEY="test"):
+            reply = self.client.post(reverse("storefront:chat_message"), data=json.dumps({"message": "hi"}),
+                                     content_type="application/json").json()["reply"]
+        self.assertEqual(reply, "\u0915\u094d\u200d\u0937")
+
+    def test_daily_cleanup_removes_expired_sessions_and_old_product_views(self):
+        from django.contrib.sessions.models import Session
+        from .models import ProductView
+        stale = Session.objects.create(session_key="stale", session_data="x", expire_date=timezone.now() - timedelta(days=1))
+        live = Session.objects.create(session_key="live", session_data="x", expire_date=timezone.now() + timedelta(days=1))
+        old_view = ProductView.objects.create(product=self.product, session_key="old")
+        ProductView.objects.filter(pk=old_view.pk).update(created_at=timezone.now() - timedelta(days=91))
+        recent_view = ProductView.objects.create(product=self.product, session_key="recent")
+        self.client.get(self.product.get_absolute_url())
+        self.assertFalse(Session.objects.filter(pk=stale.pk).exists())
+        self.assertTrue(Session.objects.filter(pk=live.pk).exists())
+        self.assertFalse(ProductView.objects.filter(pk=old_view.pk).exists())
+        self.assertTrue(ProductView.objects.filter(pk=recent_view.pk).exists())
+        # Runs at most once a day: new stale data isn't touched by the next visit.
+        again = Session.objects.create(session_key="stale2", session_data="x", expire_date=timezone.now() - timedelta(days=1))
+        self.client.get(self.product.get_absolute_url())
+        self.assertTrue(Session.objects.filter(pk=again.pk).exists())
+
+    def test_next_redirects_stay_on_this_site(self):
+        self.login_customer()
+        cases = (("https://evil.example.com/", None), ("//evil.example.com/", None), ("/shop/", "/shop/"))
+        for next_url, expected in cases:
+            response = self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1, "next": next_url})
+            self.assertEqual(response["Location"], expected or reverse("storefront:cart"), next_url)
+            response = self.client.post(reverse("storefront:toggle_wishlist", args=[self.product.id]), {"next": next_url})
+            self.assertEqual(response["Location"], expected or self.product.get_absolute_url(), next_url)
+
+    def test_pages_have_description_and_canonical_without_query(self):
+        page = self.client.get(reverse("storefront:product_list"), {"sort": "price_low", "q": "mug"}).content.decode()
+        self.assertRegex(page, r'<meta name="description" content="[^"]{20,}">')
+        self.assertIn('<link rel="canonical" href="http://testserver/shop/">', page)
+        product_page = self.client.get(self.product.get_absolute_url()).content.decode()
+        self.assertIn('<meta name="description" content="Ceramic mug">', product_page)
+
+    def test_product_page_has_structured_data_that_cannot_break_out(self):
+        self.product.name = 'Mug </script><script>alert(1)</script>'
+        self.product.save()
+        user = self.login_customer()
+        Review.objects.create(product=self.product, user=user, rating=4, title="ok", body="ok")
+        page = self.client.get(self.product.get_absolute_url()).content.decode()
+        self.assertNotIn("<script>alert(1)</script>", page)
+        block = re.search(r'<script type="application/ld\+json">(.*?)</script>', page, re.S).group(1)
+        data = json.loads(block)
+        self.assertEqual(data["@type"], "Product")
+        self.assertEqual(data["name"], self.product.name)
+        self.assertEqual(data["offers"]["price"], "299.00")
+        self.assertEqual(data["offers"]["priceCurrency"], "INR")
+        self.assertEqual(data["offers"]["availability"], "https://schema.org/InStock")
+        self.assertEqual(data["aggregateRating"]["reviewCount"], 1)
+
+    def test_robots_txt_and_sitemap(self):
+        robots = self.client.get("/robots.txt")
+        self.assertEqual(robots.status_code, 200)
+        self.assertEqual(robots["Content-Type"], "text/plain")
+        body = robots.content.decode()
+        self.assertIn("Disallow: /checkout/", body)
+        self.assertIn("Sitemap: http://testserver/sitemap.xml", body)
+        self.assertNotIn("staff", body)  # never advertise the admin address
+        hidden = Product.objects.create(category=self.product.category, name="Hidden", short_description="x",
+                                        description="x", price="1", stock=1, is_active=False)
+        sitemap = self.client.get("/sitemap.xml")
+        self.assertEqual(sitemap.status_code, 200)
+        xml = sitemap.content.decode()
+        self.assertIn(f"http://testserver{self.product.get_absolute_url()}", xml)
+        self.assertNotIn(hidden.get_absolute_url(), xml)
+        self.assertIn("http://testserver/returns/", xml)
+
+    @patch("storefront.services.ai_providers.anthropic.Anthropic")
+    def test_claude_provider_uses_configured_model(self, anthropic_client):
+        from .services import lux as lux_module
+        lux_module._lux_instance = None
+        self.addCleanup(setattr, lux_module, "_lux_instance", None)
+        with self.settings(AI_PROVIDER="claude", CLAUDE_API_KEY="test", CLAUDE_MODEL="claude-test-model"):
+            self.assertEqual(lux_module.get_lux().provider.model, "claude-test-model")
+
+    def test_privacy_policy_explains_lux_ai_processing(self):
+        page = self.client.get(reverse("storefront:trust_page", args=["privacy"])).content.decode()
+        self.assertIn("Lux", page)
+        self.assertIn("Groq", page)
+        self.assertIn("never sent", page)
+
+    def paid_online_order(self, user, **payment_fields):
+        order = Order.objects.create(
+            user=user, email=user.email, full_name="Buyer", phone="9999999999", address_line1="1 Main", city="Pune",
+            state="Maharashtra", postal_code="411001", payment_method="razorpay", payment_status="paid",
+            subtotal="348", total="348", status=Order.Status.PLACED, inventory_deducted=True,
+        )
+        OrderItem.objects.create(order=order, product=self.product, product_name=self.product.name, quantity=1, unit_price="348")
+        payment = PaymentTransaction.objects.create(
+            order=order, provider_payment_id="pay_abc123", amount="348", status=PaymentTransaction.Status.CAPTURED,
+            provider_payload={"payment": {"id": "pay_abc123", "method": "netbanking", "bank": "CNRB"}}, **payment_fields,
+        )
+        return order, payment
+
+    def test_payment_confirmation_email_has_amount_reference_and_method(self):
+        from .services import mark_payment_captured
+        user = self.login_customer()
+        order, payment = self.paid_online_order(user)
+        PaymentTransaction.objects.filter(pk=payment.pk).update(status=PaymentTransaction.Status.CREATED)
+        payment.refresh_from_db()
+        order.status, order.payment_status = Order.Status.PAYMENT_PENDING, "initiated"
+        order.save()
+        mark_payment_captured(payment, "pay_abc123", {"id": "pay_abc123", "method": "upi", "amount": 34800})
+        from .services import payment_captured_message
+        body = payment_captured_message(order)
+        self.assertIn("\u20b9348.00", body)
+        self.assertIn("pay_abc123", body)
+        self.assertIn("UPI", body)
+
+    @patch("storefront.admin.refund_captured_payment")
+    def test_refund_started_email_has_amount_timeline_and_reference(self, refund):
+        from django.contrib import admin as django_admin
+        from django.contrib.messages.storage.fallback import FallbackStorage
+        from django.test import RequestFactory
+        from .admin import OrderRequestAdmin
+        user = self.login_customer()
+        order, payment = self.paid_online_order(user)
+        Order.objects.filter(pk=order.pk).update(status=Order.Status.CANCELLATION_REQUESTED)
+        def start_refund(target):
+            PaymentTransaction.objects.filter(pk=payment.pk).update(
+                status=PaymentTransaction.Status.REFUND_PENDING, provider_refund_id="rfnd_xyz",
+                provider_payload={**payment.provider_payload, "refund": {"id": "rfnd_xyz", "amount": 34800, "status": "pending"}})
+            return PaymentTransaction.objects.get(pk=payment.pk)
+        refund.side_effect = start_refund
+        change = OrderRequest.objects.create(order=Order.objects.get(pk=order.pk), user=user, request_type="cancellation", reason="changed_mind")
+        change.status = OrderRequest.Status.APPROVED
+        request = RequestFactory().post("/")
+        request.session = self.client.session
+        request._messages = FallbackStorage(request)
+        mail.outbox.clear()
+        OrderRequestAdmin(OrderRequest, django_admin.site).save_model(request, change, None, True)
+        body = mail.outbox[-1].body
+        self.assertIn("\u20b9348.00", body)
+        self.assertIn("rfnd_xyz", body)
+        self.assertIn("5\u20137 working days", body)
+        self.assertIn("Net banking", body)
+
+    @override_settings(RAZORPAY_KEY_ID="rzp_test_key", RAZORPAY_KEY_SECRET="secret", RAZORPAY_WEBHOOK_SECRET="webhook-secret")
+    @patch("storefront.views.razorpay.Client")
+    def test_refund_processed_email_and_order_page_show_arn(self, client_class):
+        user = self.login_customer()
+        order, payment = self.paid_online_order(user, provider_refund_id="rfnd_xyz")
+        PaymentTransaction.objects.filter(pk=payment.pk).update(status=PaymentTransaction.Status.REFUND_PENDING)
+        Order.objects.filter(pk=order.pk).update(status=Order.Status.CANCELLED, payment_status="refund_pending")
+        payload = {"event": "refund.processed", "payload": {"refund": {"entity": {
+            "id": "rfnd_xyz", "payment_id": "pay_abc123", "amount": 34800, "currency": "INR", "status": "processed",
+            "acquirer_data": {"arn": "74332216123456789012345"}}}}}
+        mail.outbox.clear()
+        self.client.post(reverse("storefront:razorpay_webhook"), data=json.dumps(payload), content_type="application/json",
+                         headers={"X-Razorpay-Signature": "valid", "X-Razorpay-Event-Id": "event-refund-arn"})
+        body = mail.outbox[-1].body
+        for expected in ("\u20b9348.00", "rfnd_xyz", "74332216123456789012345", "5\u20137 working days", "Net banking"):
+            self.assertIn(expected, body)
+        page = self.client.get(reverse("storefront:order_confirmation", args=[order.number])).content.decode()
+        for expected in ("\u20b9348.00", "rfnd_xyz", "74332216123456789012345", "5\u20137 working days"):
+            self.assertIn(expected, page)
+
+    def test_lux_refund_timeline_matches_customer_emails(self):
+        from .services import REFUND_TIMELINE
+        from .services.lux_prompt import build_system_prompt
+        self.assertIn("5\u20137 working days", REFUND_TIMELINE)
+        self.assertIn("5\u20137 working days", build_system_prompt())
+        self.assertIn("ARN", build_system_prompt())
+
+    def test_indian_mobile_numbers_are_validated_and_normalised(self):
+        from django.core.exceptions import ValidationError
+        from .forms import normalize_indian_mobile
+        for raw in ("9566149359", "+91 95661 49359", "+919566149359", "919566149359", "09566149359", "95661-49359", "(956) 614 9359"):
+            self.assertEqual(normalize_indian_mobile(raw), "+919566149359", raw)
+        for raw in ("", "956614935", "95661493590", "1566149359", "5566149359", "0422 2345678", "9999999999", "9876543210", "+1 4155552671", "95661a4935"):
+            with self.assertRaises(ValidationError, msg=raw):
+                normalize_indian_mobile(raw)
+
+    def test_signup_requires_a_valid_mobile_and_saves_it_to_the_profile(self):
+        from .models import UserProfile
+        data = {"username": "phonebuyer", "email": "phonebuyer@example.com", "password1": "Secur3Password!", "password2": "Secur3Password!"}
+        response = self.client.post(reverse("storefront:signup"), data)
+        self.assertContains(response, 'id="id_phone_error"')
+        response = self.client.post(reverse("storefront:signup"), {**data, "phone": "12345"})
+        self.assertContains(response, "valid 10-digit Indian mobile number")
+        self.assertEqual(len(mail.outbox), 0)
+        self.client.post(reverse("storefront:signup"), {**data, "phone": "+91 95661 49359"})
+        code = re.search(r"\b(\d{6})\b", mail.outbox[-1].body).group(1)
+        self.client.post(reverse("storefront:verify_email"), {"code": code})
+        profile = UserProfile.objects.get(user__username="phonebuyer")
+        self.assertEqual(profile.phone, "+919566149359")
+        self.assertContains(self.client.get(reverse("storefront:account")), 'value="+919566149359"')
+
+    def test_account_page_validates_mobile_and_new_user_can_open_it(self):
+        from .models import UserProfile
+        user = self.login_customer()
+        self.assertFalse(UserProfile.objects.filter(user=user).exists())
+        self.assertEqual(self.client.get(reverse("storefront:account")).status_code, 200)
+        response = self.client.post(reverse("storefront:account"), {"phone": "9999999999"})
+        self.assertContains(response, "real mobile number")
+        self.client.post(reverse("storefront:account"), {"phone": "098765 12345"})
+        self.assertEqual(UserProfile.objects.get(user=user).phone, "+919876512345")
+
+    def test_checkout_prefills_profile_mobile_when_no_saved_address(self):
+        from .models import UserProfile
+        user = self.login_customer()
+        UserProfile.objects.create(user=user, phone="+919566149359")
+        self.client.post(reverse("storefront:add_to_cart", args=[self.product.id]), {"quantity": 1})
+        page = self.client.get(reverse("storefront:checkout")).content.decode()
+        self.assertRegex(page, r'<input[^>]*name="phone"[^>]*value="\+919566149359"')
 
     def test_site_url_validation_in_settings(self):
         """SITE_URL must be set in production and must have http/https protocol."""
@@ -705,10 +1424,10 @@ class ProductCSVImportAdminTests(TestCase):
         self.client.force_login(self.admin_user)
         self.url = reverse("admin:storefront_product_upload_csv")
 
-    def _upload(self, csv_text):
+    def _upload(self, csv_text, follow=False):
         from django.core.files.uploadedfile import SimpleUploadedFile
         csv_file = SimpleUploadedFile("products.csv", csv_text.encode("utf-8"), content_type="text/csv")
-        return self.client.post(self.url, {"csv_file": csv_file})
+        return self.client.post(self.url, {"csv_file": csv_file}, follow=follow)
 
     def test_variant_with_hyphenated_sku_is_imported_correctly(self):
         from .models import ProductVariant
@@ -785,19 +1504,73 @@ class ProductCSVImportAdminTests(TestCase):
         from .models import ProductImage
         mock_response = mock_get.return_value
         mock_response.raise_for_status.return_value = None
+        mock_response.is_redirect = False
         mock_response.headers = {"Content-Type": "image/png"}
-        mock_response.raw.read.return_value = b"fake-image-bytes"
+        mock_response.raw.read.return_value = self.png_bytes()
         csv_text = (
             "name,category,price,stock,description,images\n"
             "Mug,Home,299,5,A mug,https://example.com/mug.png\n"
         )
-        self._upload(csv_text)
+        with patch("storefront.admin.socket.getaddrinfo", return_value=self.public_address()):
+            self._upload(csv_text)
         image = ProductImage.objects.get(product__name="Mug")
         # The stored file name should not simply be the raw URL, and it should
         # contain the bytes we "downloaded", not just reference the remote URL.
         self.assertNotEqual(image.image.name, "https://example.com/mug.png")
-        self.assertEqual(image.image.read(), b"fake-image-bytes")
+        self.assertEqual(image.image.read(), self.png_bytes())
         image.image.delete(save=False)
+
+    @staticmethod
+    def png_bytes():
+        from io import BytesIO
+        from PIL import Image
+        buffer = BytesIO()
+        Image.new("RGB", (2, 2), "red").save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    @staticmethod
+    def public_address():
+        import socket
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", 443))]
+
+    def test_oversized_csv_upload_is_rejected(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        big = "name,category,price,stock,description\n" + ("x,y,1,1,z\n" * 300_000)
+        response = self.client.post(self.url, {"csv_file": SimpleUploadedFile("big.csv", big.encode(), content_type="text/csv")})
+        self.assertContains(response, "too large")
+        self.assertFalse(Product.objects.filter(name="x").exists())
+
+    @override_settings(STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    })
+    @patch("storefront.admin.requests.get")
+    def test_non_image_download_is_rejected_and_existing_photos_are_kept(self, mock_get):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from .models import ProductImage
+        self._upload("name,category,price,stock,description\nMug,Home,299,5,A mug\n")
+        product = Product.objects.get(name="Mug")
+        original = ProductImage.objects.create(product=product, image=SimpleUploadedFile("orig.png", self.png_bytes()))
+        mock_response = mock_get.return_value
+        mock_response.status_code = 200
+        mock_response.is_redirect = False
+        mock_response.headers = {"Content-Type": "text/html"}
+        mock_response.raw.read.return_value = b"<html>Not found</html>"
+        with patch("storefront.admin.socket.getaddrinfo", return_value=self.public_address()):
+            response = self._upload("name,category,price,stock,description,images\nMug,Home,299,5,A mug,https://example.com/missing.png\n", follow=True)
+        self.assertContains(response, "not a valid image")
+        self.assertEqual(list(ProductImage.objects.filter(product=product)), [original])
+        original.image.delete(save=False)
+
+    @patch("storefront.admin.requests.get")
+    def test_internal_image_addresses_are_never_fetched(self, mock_get):
+        import socket
+        for url, address in (("http://127.0.0.1/x.png", "127.0.0.1"), ("http://169.254.169.254/latest", "169.254.169.254"),
+                             ("http://internal.example/x.png", "10.1.2.3")):
+            with patch("storefront.admin.socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 80))]):
+                response = self._upload(f"name,category,price,stock,description,images\nMug,Home,299,5,A mug,{url}\n", follow=True)
+            self.assertContains(response, "not allowed")
+        mock_get.assert_not_called()
 
 
 class AccountPageTests(TestCase):
@@ -819,10 +1592,15 @@ class AccountPageTests(TestCase):
         self.assertTrue(UserProfile.objects.filter(user=self.user).exists())
 
     def test_post_updates_phone_number(self):
-        response = self.client.post(self.url, {"phone": "9876543210"}, follow=True)
+        self.assertContains(self.client.get(self.url), "Not added yet")
+        response = self.client.post(self.url, {"phone": "9566149359"}, follow=True)
         self.assertEqual(response.status_code, 200)
         profile = UserProfile.objects.get(user=self.user)
-        self.assertEqual(profile.phone, "9876543210")
+        self.assertEqual(profile.phone, "+919566149359")
+        self.assertContains(response, "Mobile number saved: +91 95661 49359")
+        self.assertContains(response, "<dd class=\"m-0\">+91 95661 49359</dd>", html=False)
+        self.assertContains(response, "Change mobile number")
+        self.assertNotContains(response, "Not added yet")
 
     def test_password_change_view_renders(self):
         response = self.client.get(reverse("password_change"))
@@ -881,6 +1659,39 @@ class RateLimitTests(TestCase):
         response = self.client.post(url, {"username": "nobody", "password": "wrong"})
         self.assertEqual(response.status_code, 429)
 
+    def test_spoofed_forwarded_for_does_not_bypass_limit(self):
+        url = reverse("login")
+        for i in range(15):
+            self.client.get(url, HTTP_X_FORWARDED_FOR=f"203.0.113.{i}")
+        response = self.client.get(url, HTTP_X_FORWARDED_FOR="198.51.100.99")
+        self.assertEqual(response.status_code, 429)
+
+    @override_settings(TRUST_TRUE_CLIENT_IP=True)
+    def test_on_render_limit_is_per_true_client_ip(self):
+        url = reverse("login")
+        for i in range(15):
+            self.client.get(url, HTTP_TRUE_CLIENT_IP="81.97.145.24", HTTP_X_FORWARDED_FOR=f"203.0.113.{i}")
+        self.assertEqual(self.client.get(url, HTTP_TRUE_CLIENT_IP="81.97.145.24").status_code, 429)
+        self.assertEqual(self.client.get(url, HTTP_TRUE_CLIENT_IP="81.97.145.25").status_code, 200)
+
+
+    def test_password_reset_page_is_rate_limited_per_ip(self):
+        url = reverse("storefront:password_reset")
+        for _ in range(10):
+            self.assertNotEqual(self.client.get(url).status_code, 429)
+        self.assertEqual(self.client.get(url).status_code, 429)
+
+    def test_stock_password_reset_url_goes_to_the_limited_one(self):
+        response = self.client.get("/accounts/password_reset/")
+        self.assertRedirects(response, reverse("storefront:password_reset"), fetch_redirect_response=False)
+
+    def test_reset_emails_per_address_are_capped(self):
+        User.objects.create_user("victim", "victim@example.com", "Secur3Password!")
+        url = reverse("storefront:password_reset")
+        for _ in range(5):
+            response = self.client.post(url, {"email": "Victim@Example.com"})
+            self.assertRedirects(response, reverse("storefront:password_reset_done"), fetch_redirect_response=False)
+        self.assertEqual(len(mail.outbox), 3)
 
 class SecurityHeaderTests(TestCase):
     def test_content_security_policy_header_is_present(self):
@@ -888,6 +1699,13 @@ class SecurityHeaderTests(TestCase):
         self.assertIn("Content-Security-Policy", response)
         self.assertIn("default-src 'self'", response["Content-Security-Policy"])
         self.assertIn("frame-ancestors 'none'", response["Content-Security-Policy"])
+
+    def test_pages_use_built_tailwind_css_not_the_cdn(self):
+        response = self.client.get(reverse("storefront:home"))
+        page = response.content.decode()
+        self.assertNotIn("cdn.tailwindcss.com", page)
+        self.assertIn("storefront/css/tailwind.", page)
+        self.assertNotIn("cdn.tailwindcss.com", response["Content-Security-Policy"])
 
 
 @override_settings(DEBUG=False, ALLOWED_HOSTS=["testserver"])

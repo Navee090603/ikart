@@ -1,15 +1,18 @@
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from importlib import import_module
 import logging
 
 from django.conf import settings
+from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, When
 from django.utils import timezone
 import razorpay
 
-from .models import Coupon, CouponRedemption, NotificationLog, Order, OrderItem, PaymentTransaction, Product, ProductVariant, ProductView
+from ..models import Coupon, CouponRedemption, NotificationLog, Order, OrderItem, PaymentTransaction, Product, ProductVariant, ProductView
 
 
 @dataclass
@@ -56,7 +59,7 @@ def build_order_tracking_steps(order):
 def calculate_cart_quote(cart, user=None, delivery_option=Order.DeliveryOption.STANDARD, coupon_code=""):
     """The only source of truth for cart, checkout, and payment amounts."""
     subtotal = cart.subtotal
-    delivery_fee = Decimal("99") if delivery_option == Order.DeliveryOption.EXPRESS else (Decimal("0") if subtotal >= 499 else Decimal("49"))
+    delivery_fee = Decimal("99") if delivery_option == Order.DeliveryOption.EXPRESS else Decimal("0")
     coupon = None
     discount_amount = Decimal("0")
     coupon_error = ""
@@ -124,7 +127,7 @@ def restore_order_inventory(order):
         return True
 
 
-def _release_coupon_redemption(order):
+def release_coupon_redemption(order):
     """Do not consume a coupon for an online payment that did not complete."""
     CouponRedemption.objects.filter(order=order).delete()
 
@@ -198,30 +201,131 @@ def fail_or_cancel_payment(payment, status, payload=None):
         payment.save(update_fields=["status", "provider_payload", "inventory_released", "updated_at"])
         order = payment.order
         restore_order_inventory(order)
-        _release_coupon_redemption(order)
+        release_coupon_redemption(order)
         order.payment_status = "failed" if status == PaymentTransaction.Status.FAILED else "cancelled"
         order.status = Order.Status.PAYMENT_FAILED
         order.save(update_fields=["payment_status", "status", "updated_at"])
         return order
 
 
-def release_stale_payment_reservations(cutoff):
-    """Release old uncompleted Razorpay reservations; safe to run repeatedly."""
-    payment_ids = list(
-        PaymentTransaction.objects.filter(
-            status__in=[PaymentTransaction.Status.CREATED, PaymentTransaction.Status.AUTHORIZED],
-            created_at__lt=cutoff,
-        ).values_list("id", flat=True)
-    )
+def claim_guest_orders(user):
+    """Attach orders placed as a guest to the account with the same email.
+
+    Safe because account emails are verified by OTP at sign-up and can't be
+    changed afterwards.
+    """
+    if not user.email:
+        return 0
+    return Order.objects.filter(user__isnull=True, email__iexact=user.email).update(user=user)
+
+
+def razorpay_client():
+    if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
+        return None
+    return razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+
+
+def _provider_payment_state(client, payment):
+    """Ask Razorpay what happened to an unfinished attempt.
+
+    Returns ("paid", payment_entity), ("unpaid", None) once it can no longer be
+    paid, or ("unknown", None) when it may still be paid or cannot be checked.
+    """
+    link_id = payment.provider_payment_link_id or payment.provider_payload.get("payment_link_id")
+    if link_id:
+        link = client.payment_link.fetch(link_id)
+        status = link.get("status")
+        if status == "paid":
+            captured = [p for p in link.get("payments") or [] if p.get("status") == "captured"]
+            return ("paid", client.payment.fetch(captured[0]["payment_id"])) if captured else ("unknown", None)
+        if status in {"expired", "cancelled"}:
+            return "unpaid", None
+        if status == "created":
+            # Past its expiry but not yet flipped by Razorpay: cancel it so it can't be paid later.
+            client.payment_link.cancel(link_id)
+            return "unpaid", None
+        return "unknown", None
+    if payment.provider_order_id:
+        # Legacy checkout.js orders: that flow is gone, so an order with no successful
+        # payment can no longer be completed from the site.
+        attempts = client.order.payments(payment.provider_order_id).get("items", [])
+        captured = [p for p in attempts if p.get("status") == "captured"]
+        if captured:
+            return "paid", captured[0]
+        if any(p.get("status") == "authorized" for p in attempts):
+            return "unknown", None
+        return "unpaid", None
+    return "unpaid", None
+
+
+def release_stale_payment_reservations(cutoff, client=None):
+    """Settle online-payment attempts older than `cutoff` that never completed.
+
+    Checks Razorpay first: paid attempts are confirmed instead of cancelled, and
+    anything still payable or unreachable is left alone. Safe to run repeatedly.
+    Returns the number of reservations released.
+    """
+    payments = PaymentTransaction.objects.filter(
+        status=PaymentTransaction.Status.CREATED, created_at__lt=cutoff,
+    ).select_related("order")
     released = 0
-    for payment_id in payment_ids:
-        payment = PaymentTransaction.objects.filter(pk=payment_id).first()
-        if not payment:
-            continue
+    for payment in payments:
+        if client:
+            try:
+                state, provider_payment = _provider_payment_state(client, payment)
+            except Exception:
+                logging.getLogger(__name__).exception("Could not check Razorpay for order %s", payment.order.number)
+                continue
+            if state == "unknown":
+                continue
+            if state == "paid":
+                if int(provider_payment.get("amount", 0)) == int(payment.amount * 100):
+                    order = mark_payment_captured(payment, provider_payment["id"], provider_payment)
+                    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", payment_captured_message(order))
+                continue
         order = fail_or_cancel_payment(payment, PaymentTransaction.Status.CANCELLED, {"reason": "payment_reservation_expired"})
         if order.payment_status == "cancelled":
             released += 1
     return released
+
+
+CLEANUP_KEY = "maintenance:daily_cleanup"
+PRODUCT_VIEW_RETENTION_DAYS = 90
+
+
+def run_daily_cleanup_if_due():
+    """Delete expired sessions and old product-view rows, at most once a day per process.
+
+    Both tables otherwise grow forever: every product page view adds a row, and Django only
+    removes expired sessions via the clearsessions command, which Render's free plan can't
+    schedule.
+    """
+    if not cache.add(CLEANUP_KEY, True, timeout=24 * 60 * 60):
+        return
+    try:
+        ProductView.objects.filter(created_at__lt=timezone.now() - timedelta(days=PRODUCT_VIEW_RETENTION_DAYS)).delete()
+        import_module(settings.SESSION_ENGINE).SessionStore.clear_expired()
+    except Exception:
+        logging.getLogger(__name__).exception("Daily cleanup failed")
+
+
+RESERVATION_SWEEP_KEY = "payments:reservation_sweep"
+
+
+def release_expired_reservations_if_due():
+    """Run the reservation sweep at most every 5 minutes per process.
+
+    Render's free plan has no scheduler, so shopping pages trigger this instead.
+    """
+    if not cache.add(RESERVATION_SWEEP_KEY, True, timeout=300):
+        return
+    cutoff = timezone.now() - timedelta(minutes=settings.PAYMENT_RESERVATION_MINUTES + 5)
+    if not PaymentTransaction.objects.filter(status=PaymentTransaction.Status.CREATED, created_at__lt=cutoff).exists():
+        return
+    try:
+        release_stale_payment_reservations(cutoff, razorpay_client())
+    except Exception:
+        logging.getLogger(__name__).exception("Reservation sweep failed")
 
 
 def refund_captured_payment(order):
@@ -267,7 +371,7 @@ def frequently_bought_together(product, limit=4):
     if not ids:
         return Product.objects.none()
     ordering = Case(*[When(id=product_id, then=position) for position, product_id in enumerate(ids)], output_field=IntegerField())
-    return Product.objects.filter(id__in=ids, is_active=True).order_by(ordering)
+    return Product.objects.filter(id__in=ids, is_active=True).prefetch_related("images").order_by(ordering)
 
 
 # Orders in these states never resulted in the buyer actually keeping the
@@ -301,7 +405,68 @@ def customers_also_viewed(product, limit=4):
     if not ids:
         return Product.objects.none()
     ordering = Case(*[When(id=product_id, then=position) for position, product_id in enumerate(ids)], output_field=IntegerField())
-    return Product.objects.filter(id__in=ids, is_active=True).order_by(ordering)
+    return Product.objects.filter(id__in=ids, is_active=True).prefetch_related("images").order_by(ordering)
+
+
+REFUND_TIMELINE = "Banks usually credit refunds within 5–7 working days."
+PAYMENT_METHOD_LABELS = {"card": "Card", "upi": "UPI", "netbanking": "Net banking", "wallet": "Wallet", "emi": "EMI"}
+
+
+def payment_details(order):
+    """Customer-facing payment and refund facts for an online order, or None (e.g. cash on delivery)."""
+    payment = PaymentTransaction.objects.filter(order=order).first()
+    if not payment:
+        return None
+    payload = payment.provider_payload or {}
+    method = (payload.get("payment") or {}).get("method", "")
+    details = {"payment_id": payment.provider_payment_id, "method": PAYMENT_METHOD_LABELS.get(method, method.title())}
+    refund = payload.get("refund") or {}
+    if payment.provider_refund_id or refund:
+        if payment.status == PaymentTransaction.Status.REFUNDED:
+            status = "processed"
+        elif order.payment_status == "refund_failed":
+            status = "failed"
+        else:
+            status = "pending"
+        details["refund"] = {
+            "id": refund.get("id") or payment.provider_refund_id,
+            "amount": (Decimal(refund["amount"]) / 100).quantize(Decimal("0.01")) if refund.get("amount") else payment.amount,
+            "status": status,
+            "arn": (refund.get("acquirer_data") or {}).get("arn", ""),
+        }
+    return details
+
+
+def _destination(details):
+    return f"your original payment method ({details['method']})" if details.get("method") else "your original payment method"
+
+
+def payment_captured_message(order):
+    details = payment_details(order) or {}
+    lines = [f"Your payment of ₹{Decimal(order.total):.2f} for order {order.number} was successful."]
+    if details.get("payment_id"):
+        method = f" · {details['method']}" if details.get("method") else ""
+        lines.append(f"Payment reference: {details['payment_id']}{method}")
+    return "\n".join(lines)
+
+
+def refund_message(order):
+    details = payment_details(order) or {}
+    refund = details.get("refund")
+    if not refund:
+        return "Your refund has been initiated. Our support team can help if you have questions."
+    if refund["status"] == "processed":
+        lines = [f"Your refund of ₹{refund['amount']} for order {order.number} has been sent to {_destination(details)}.",
+                 REFUND_TIMELINE, f"Refund reference: {refund['id']}"]
+        if refund["arn"]:
+            lines += [f"Bank reference (ARN): {refund['arn']}",
+                      "If the money hasn't arrived after 7 working days, contact your bank and quote the ARN."]
+        return "\n".join(lines)
+    return "\n".join([
+        f"We've started a refund of ₹{refund['amount']} for order {order.number} to {_destination(details)}.",
+        f"We'll email you again once the payment provider confirms it. {REFUND_TIMELINE}",
+        f"Refund reference: {refund['id']}",
+    ])
 
 
 def notify_order_email(order, event, subject, message):

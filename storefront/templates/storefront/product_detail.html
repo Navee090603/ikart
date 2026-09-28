@@ -1,6 +1,8 @@
 {% extends 'storefront/base.html' %}{% load storefront_extras %}
 
 {% block title %}{{ product.name }} | IKart{% endblock %}
+{% block meta_description %}{{ product.short_description }}{% endblock %}
+{% block extra_head %}{% product_json_ld %}{% endblock %}
 
 {% block content %}
 <div class="ik-page flex flex-col gap-12">
@@ -107,8 +109,8 @@
 
         <ul class="ik-perks">
           <li>{% icon 'lock' 18 %}Secure SSL checkout</li>
-          <li>{% icon 'check-circle' 18 %}30-day return policy</li>
-          <li>{% icon 'truck' 18 %}Free shipping over ₹999</li>
+          <li>{% icon 'check-circle' 18 %}7-day returns on unused items</li>
+          <li>{% icon 'truck' 18 %}Free standard delivery on every order</li>
         </ul>
       </section>
     </div>
@@ -154,7 +156,7 @@
           {% csrf_token %}
           <label for="{{ question_form.question.id_for_label }}">Ask a question</label>
           {{ question_form.question }}
-          {% for error in question_form.question.errors %}<p class="ik-error">{{ error }}</p>{% endfor %}
+          {% if question_form.question.errors %}<p id="{{ question_form.question.id_for_label }}_error" class="ik-error">{{ question_form.question.errors|join:" " }}</p>{% endif %}
           <button class="ik-btn ik-btn-secondary self-start">Post question</button>
         </form>
         {% else %}

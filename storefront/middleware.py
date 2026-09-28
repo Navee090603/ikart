@@ -1,16 +1,16 @@
 class ContentSecurityPolicyMiddleware:
     """Adds a pragmatic CSP header.
 
-    Templates rely on inline <script>/<style> blocks and the Tailwind CDN, so
-    this isn't a strict CSP — 'unsafe-inline' is required for script/style to
-    avoid breaking the existing UI. It still restricts the categories that
-    matter most for this app: no third-party script hosts beyond Tailwind's
-    CDN, no framing (clickjacking), no arbitrary form targets.
+    Templates rely on inline <script>/<style> blocks, so this isn't a strict
+    CSP — 'unsafe-inline' is required for script/style to avoid breaking the
+    existing UI. It still restricts the categories that matter most for this
+    app: no third-party script hosts beyond Razorpay, no framing
+    (clickjacking), no arbitrary form targets.
     """
 
     CSP = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://checkout.razorpay.com; "
+        "script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: https:; "
         "font-src 'self' data:; "

@@ -7,7 +7,7 @@ import environ
 from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-env = environ.Env(DEBUG=(bool, True))
+env = environ.Env(DEBUG=(bool, False))
 environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("SECRET_KEY", default="change-this-local-development-key")
@@ -25,6 +25,11 @@ SITE_URL = env(
     "SITE_URL",
     default="http://127.0.0.1:8000" if DEBUG else None,
 )
+
+# Production runs behind Render's Cloudflare edge, which always sets True-Client-IP to the
+# real client and overwrites any value a client sends (verified live). REMOTE_ADDR there is
+# 127.0.0.1 for everyone, so it can't be used to tell visitors apart.
+TRUST_TRUE_CLIENT_IP = env.bool("TRUST_TRUE_CLIENT_IP", default=not DEBUG)
 
 CSRF_TRUSTED_ORIGINS = env.list(
     "CSRF_TRUSTED_ORIGINS",
@@ -47,7 +52,7 @@ if SITE_URL and not SITE_URL.startswith(("http://", "https://")):
 
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
-    "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
+    "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles", "django.contrib.sitemaps",
     "cloudinary", "cloudinary_storage", "anymail", "storefront",
 ]
 MIDDLEWARE = [
@@ -167,6 +172,17 @@ try:
     TAX_RATE = Decimal(env("TAX_RATE", default="0"))
 except InvalidOperation:
     TAX_RATE = Decimal("0")
+
+# AI Provider Configuration for Lux Chatbot
+# Supports: 'groq' (default), 'claude', 'openai', 'ollama'
+# Switch providers by changing AI_PROVIDER env var (no code changes needed!)
+AI_PROVIDER = env("AI_PROVIDER", default="groq")
+CLAUDE_API_KEY = env("CLAUDE_API_KEY", default="")
+CLAUDE_MODEL = env("CLAUDE_MODEL", default="claude-haiku-4-5-20251001")
+GROQ_API_KEY = env("GROQ_API_KEY", default="")
+GROQ_MODEL = env("GROQ_MODEL", default="openai/gpt-oss-20b")
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+OLLAMA_BASE_URL = env("OLLAMA_BASE_URL", default="http://localhost:11434")
 
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

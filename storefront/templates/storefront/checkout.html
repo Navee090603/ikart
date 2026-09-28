@@ -30,13 +30,7 @@
         <div class="ik-field mt-4">
           <label for="{{ form.email.id_for_label }}">Email</label>
           {{ form.email }}
-          <p id="{{ form.email.id_for_label }}-error" class="ik-error{% if not form.email.errors %} hidden{% endif %}">{{ form.email.errors.0 }}</p>
-          {% if not user.is_authenticated %}
-          <div id="email-registered-notice" class="hidden ik-alert ik-alert-warning mt-2">
-            {% icon 'user' %}
-            <p>An account already exists with this email. <a href="{% url 'login' %}?next={% url 'storefront:checkout' %}">Sign in</a> to track this order and use your saved addresses.</p>
-          </div>
-          {% endif %}
+          <p id="{{ form.email.id_for_label }}_error" class="ik-error{% if not form.email.errors %} hidden{% endif %}">{{ form.email.errors.0 }}</p>
         </div>
 
         {% if form.saved_address %}
@@ -65,17 +59,17 @@
           <div class="ik-field">
             <label for="{{ form.full_name.id_for_label }}">Full name</label>
             {{ form.full_name }}
-            <p id="{{ form.full_name.id_for_label }}-error" class="ik-error{% if not form.full_name.errors %} hidden{% endif %}">{{ form.full_name.errors.0 }}</p>
+            <p id="{{ form.full_name.id_for_label }}_error" class="ik-error{% if not form.full_name.errors %} hidden{% endif %}">{{ form.full_name.errors.0 }}</p>
           </div>
           <div class="ik-field">
             <label for="{{ form.phone.id_for_label }}">Phone</label>
             {{ form.phone }}
-            <p id="{{ form.phone.id_for_label }}-error" class="ik-error{% if not form.phone.errors %} hidden{% endif %}">{{ form.phone.errors.0 }}</p>
+            <p id="{{ form.phone.id_for_label }}_error" class="ik-error{% if not form.phone.errors %} hidden{% endif %}">{{ form.phone.errors.0 }}</p>
           </div>
           <div class="ik-field sm:col-span-2">
             <label for="{{ form.address_line1.id_for_label }}">Address line 1</label>
             {{ form.address_line1 }}
-            <p id="{{ form.address_line1.id_for_label }}-error" class="ik-error{% if not form.address_line1.errors %} hidden{% endif %}">{{ form.address_line1.errors.0 }}</p>
+            <p id="{{ form.address_line1.id_for_label }}_error" class="ik-error{% if not form.address_line1.errors %} hidden{% endif %}">{{ form.address_line1.errors.0 }}</p>
           </div>
           <div class="ik-field sm:col-span-2">
             <label for="{{ form.address_line2.id_for_label }}">Address line 2 <span class="ik-optional">(optional)</span></label>
@@ -84,17 +78,17 @@
           <div class="ik-field">
             <label for="{{ form.city.id_for_label }}">City</label>
             {{ form.city }}
-            <p id="{{ form.city.id_for_label }}-error" class="ik-error{% if not form.city.errors %} hidden{% endif %}">{{ form.city.errors.0 }}</p>
+            <p id="{{ form.city.id_for_label }}_error" class="ik-error{% if not form.city.errors %} hidden{% endif %}">{{ form.city.errors.0 }}</p>
           </div>
           <div class="ik-field">
             <label for="{{ form.state.id_for_label }}">State</label>
             {{ form.state }}
-            <p id="{{ form.state.id_for_label }}-error" class="ik-error{% if not form.state.errors %} hidden{% endif %}">{{ form.state.errors.0 }}</p>
+            <p id="{{ form.state.id_for_label }}_error" class="ik-error{% if not form.state.errors %} hidden{% endif %}">{{ form.state.errors.0 }}</p>
           </div>
           <div class="ik-field">
             <label for="{{ form.postal_code.id_for_label }}">Postal code</label>
             {{ form.postal_code }}
-            <p id="{{ form.postal_code.id_for_label }}-error" class="ik-error{% if not form.postal_code.errors %} hidden{% endif %}">{{ form.postal_code.errors.0 }}</p>
+            <p id="{{ form.postal_code.id_for_label }}_error" class="ik-error{% if not form.postal_code.errors %} hidden{% endif %}">{{ form.postal_code.errors.0 }}</p>
           </div>
         </div>
       </section>
@@ -189,15 +183,5 @@ function syncAddressFields() {
 document.querySelectorAll('input[name=saved_address]').forEach((radio) => radio.addEventListener('change', syncAddressFields));
 syncAddressFields();
 
-{% if not user.is_authenticated %}
-const emailNotice = document.getElementById('email-registered-notice');
-document.getElementById('id_email')?.addEventListener('blur', async (e) => {
-    const email = e.target.value.trim();
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { emailNotice?.classList.add('hidden'); return; }
-    const r = await fetch('{% url "storefront:check_email_registered" %}?email=' + encodeURIComponent(email));
-    const d = await r.json();
-    emailNotice?.classList.toggle('hidden', !d.registered);
-});
-{% endif %}
 </script>
 {% endblock %}

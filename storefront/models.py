@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -199,8 +200,11 @@ class Order(models.Model):
     total = models.DecimalField(max_digits=10, decimal_places=2)
     inventory_deducted = models.BooleanField(default=False)
     inventory_restored = models.BooleanField(default=False)
+    delivered_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    RETURN_WINDOW_DAYS = 7
 
     class Meta:
         ordering = ["-created_at"]
@@ -208,7 +212,27 @@ class Order(models.Model):
     def save(self, *args, **kwargs):
         if not self.number:
             self.number = f"IK{uuid4().hex[:10].upper()}"
+        if self.status == self.Status.DELIVERED:
+            changed = []
+            if not self.delivered_at:
+                self.delivered_at = timezone.now()
+                changed.append("delivered_at")
+            if self.payment_method == self.PaymentMethod.COD and self.payment_status == "pending":
+                # The courier collects cash on delivery.
+                self.payment_status = "paid"
+                changed.append("payment_status")
+            update_fields = kwargs.get("update_fields")
+            if changed and update_fields is not None:
+                kwargs["update_fields"] = {*update_fields, *changed}
         super().save(*args, **kwargs)
+
+    @property
+    def return_deadline(self):
+        return self.delivered_at + timedelta(days=self.RETURN_WINDOW_DAYS) if self.delivered_at else None
+
+    @property
+    def can_request_return(self):
+        return self.status == self.Status.DELIVERED and self.return_deadline is not None and timezone.now() <= self.return_deadline
 
     def __str__(self):
         return self.number

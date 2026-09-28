@@ -10,7 +10,7 @@
   <div class="ik-card-body">
     {% if product.brand %}<p class="ik-card-brand">{{ product.brand }}</p>{% endif %}
     <h3 class="ik-card-title">{{ product.name }}</h3>
-    {% if product.reviews.count %}<p class="ik-rating"><span class="ik-star" aria-hidden="true">★</span><b>{{ product.average_rating }}</b><span>({{ product.reviews.count }})</span><span class="ik-sr"> out of 5, {{ product.reviews.count }} review{{ product.reviews.count|pluralize }}</span></p>{% else %}<p class="ik-rating">No reviews yet</p>{% endif %}
+    {% if product.review_count %}<p class="ik-rating"><span class="ik-star" aria-hidden="true">★</span><b>{{ product.rating_value|floatformat:1 }}</b><span>({{ product.review_count }})</span><span class="ik-sr"> out of 5, {{ product.review_count }} review{{ product.review_count|pluralize }}</span></p>{% else %}<p class="ik-rating">No reviews yet</p>{% endif %}
     <div class="ik-card-foot">
       <p class="ik-price">
         <span class="ik-price-now">₹{{ product.price }}</span>

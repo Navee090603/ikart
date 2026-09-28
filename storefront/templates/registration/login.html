@@ -13,7 +13,7 @@
       <div class="ik-field">
         <label for="{{ form.username.id_for_label }}">Username</label>
         {{ form.username }}
-        <p id="{{ form.username.id_for_label }}-error" class="ik-error{% if not form.username.errors %} hidden{% endif %}">{{ form.username.errors.0 }}</p>
+        <p id="{{ form.username.id_for_label }}_error" class="ik-error{% if not form.username.errors %} hidden{% endif %}">{{ form.username.errors.0 }}</p>
       </div>
       <div class="ik-field">
         <div class="flex items-center justify-between"><label for="{{ form.password.id_for_label }}">Password</label>
@@ -22,9 +22,9 @@
           {{ form.password }}
           <button type="button" class="pw-toggle" data-target="{{ form.password.id_for_label }}" aria-label="Show or hide password">Show</button>
         </div>
-        <p id="{{ form.password.id_for_label }}-error" class="ik-error{% if not form.password.errors %} hidden{% endif %}">{{ form.password.errors.0 }}</p>
+        <p id="{{ form.password.id_for_label }}_error" class="ik-error{% if not form.password.errors %} hidden{% endif %}">{{ form.password.errors.0 }}</p>
       </div>
       <button type="submit" class="ik-btn ik-btn-primary ik-btn-lg ik-btn-block">Sign in</button>
     </form>
-    <p class="ik-auth-alt">New here? <a class="ik-link" href="{% url 'storefront:signup' %}">Create an account</a></p>
+    <p class="ik-auth-alt">New here? <a class="ik-link" href="{% url 'storefront:signup' %}{% if request.GET.next %}?next={{ request.GET.next|urlencode }}{% endif %}">Create an account</a></p>
 {% endblock %}

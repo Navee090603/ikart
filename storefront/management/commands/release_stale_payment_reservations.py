@@ -4,7 +4,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from storefront.services import release_stale_payment_reservations
+from storefront.services import razorpay_client, release_stale_payment_reservations
 
 
 class Command(BaseCommand):
@@ -23,5 +23,5 @@ class Command(BaseCommand):
         if minutes < 1:
             self.stderr.write("--minutes must be at least 1.")
             return
-        released = release_stale_payment_reservations(timezone.now() - timedelta(minutes=minutes))
+        released = release_stale_payment_reservations(timezone.now() - timedelta(minutes=minutes), razorpay_client())
         self.stdout.write(self.style.SUCCESS(f"Released {released} stale payment reservation(s)."))

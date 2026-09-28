@@ -62,6 +62,21 @@
           {{ order.phone }}</p>
         <h2 class="ik-eyebrow mt-5 mb-2">Payment</h2>
         <p class="text-[15px]">{{ order.get_payment_method_display }} · {{ order.get_delivery_option_display }}</p>
+        {% if payment_info.payment_id %}<p class="text-sm ik-muted mt-1">Payment reference: {{ payment_info.payment_id }}{% if payment_info.method %} · {{ payment_info.method }}{% endif %}</p>{% endif %}
+        {% with refund=payment_info.refund %}{% if refund %}
+        <h2 class="ik-eyebrow mt-5 mb-2">Refund</h2>
+        <div class="text-[15px] leading-6">
+          {% if refund.status == 'processed' %}
+          <p><strong>₹{{ refund.amount }}</strong> sent to your original payment method{% if payment_info.method %} ({{ payment_info.method }}){% endif %}. Banks usually credit refunds within 5–7 working days.</p>
+          {% elif refund.status == 'failed' %}
+          <p><strong>₹{{ refund.amount }}</strong> refund couldn't be completed yet. Our support team will contact you.</p>
+          {% else %}
+          <p><strong>₹{{ refund.amount }}</strong> refund in progress to your original payment method{% if payment_info.method %} ({{ payment_info.method }}){% endif %}. Banks usually credit refunds within 5–7 working days once it's confirmed.</p>
+          {% endif %}
+          <p class="text-sm ik-muted mt-1">Refund reference: {{ refund.id }}</p>
+          {% if refund.arn %}<p class="text-sm ik-muted">Bank reference (ARN): {{ refund.arn }}. If the money hasn't arrived after 7 working days, contact your bank and quote this number.</p>{% endif %}
+        </div>
+        {% endif %}{% endwith %}
       </section>
     </div>
 
@@ -92,9 +107,11 @@
       <h2 id="help-title" class="ik-h2">Need help with this order?</h2>
       <div class="flex flex-wrap gap-3 mt-3">
         {% if order.status == 'placed' or order.status == 'cancellation_requested' %}<a class="ik-btn ik-btn-secondary ik-btn-sm" href="{% url 'storefront:request_order_change' order.number 'cancellation' %}">Request cancellation</a>{% endif %}
-        {% if order.status == 'delivered' or order.status == 'return_requested' %}<a class="ik-btn ik-btn-secondary ik-btn-sm" href="{% url 'storefront:request_order_change' order.number 'return' %}">Request return</a>{% endif %}
+        {% if order.can_request_return %}<a class="ik-btn ik-btn-secondary ik-btn-sm" href="{% url 'storefront:request_order_change' order.number 'return' %}">Request return</a>{% endif %}
         <a class="ik-btn ik-btn-secondary ik-btn-sm" href="{% url 'storefront:support' %}">Contact support</a>
       </div>
+      {% if order.can_request_return %}<p class="ik-muted text-sm mt-3">Returns are open until {{ order.return_deadline|date:"j M Y" }}.</p>
+      {% elif order.status == 'delivered' and order.return_deadline %}<p class="ik-muted text-sm mt-3">The return window for this order closed on {{ order.return_deadline|date:"j M Y" }}.</p>{% endif %}
       {% for request in requests %}<p class="text-sm mt-3">{{ request.get_request_type_display }} request: <strong>{{ request.get_status_display }}</strong></p>{% endfor %}
     </section>
     {% endif %}

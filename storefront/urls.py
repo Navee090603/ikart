@@ -3,6 +3,7 @@ from django.contrib.auth import views as auth_views
 from django.urls import path
 
 from . import views
+from .ratelimit import rate_limit
 
 app_name = "storefront"
 urlpatterns = [
@@ -28,7 +29,6 @@ urlpatterns = [
     path("addresses/<int:address_id>/edit/", views.edit_address, name="edit_address"),
     path("addresses/<int:address_id>/delete/", views.delete_address, name="delete_address"),
     path("checkout/", views.checkout, name="checkout"),
-    path("checkout/check-email/", views.check_email_registered, name="check_email_registered"),
     path("payment/<str:number>/", views.payment_checkout, name="payment_checkout"),
     path("payment/<str:number>/return/", views.razorpay_payment_link_callback, name="razorpay_payment_link_callback"),
     path("payment/<str:number>/verify/", views.verify_razorpay_payment, name="verify_razorpay_payment"),
@@ -48,14 +48,15 @@ urlpatterns = [
     path("support/<int:ticket_id>/", views.support_ticket, name="support_ticket"),
     path("notification-preferences/", views.notification_preferences, name="notification_preferences"),
     path("dashboard/analytics/", views.analytics_dashboard, name="analytics_dashboard"),
-        path(
+    path("chat/", views.chat_message, name="chat_message"),
+    path(
         "password-reset/",
-        views.IKartPasswordResetView.as_view(
+        rate_limit("password_reset", limit=10, period_seconds=900)(views.IKartPasswordResetView.as_view(
             template_name="storefront/password_reset.html",
             email_template_name="storefront/password_reset_email.txt",
             subject_template_name="storefront/password_reset_subject.txt",
             success_url=reverse_lazy("storefront:password_reset_done"),
-        ),
+        )),
         name="password_reset",
     ),
 

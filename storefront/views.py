@@ -14,10 +14,11 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import User
 from django.conf import settings
+from django.core.cache import cache
 from django.core.mail import send_mail
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import Avg, Count, DecimalField, ExpressionWrapper, F, Q, Sum
+from django.db.models import Avg, Count, DecimalField, ExpressionWrapper, F, Prefetch, Q, Sum
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -27,12 +28,15 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .cart import Cart
+from .templatetags.storefront_extras import mobile_display
 from .forms import AddressForm, ChangePendingEmailForm, CheckoutForm, MarketingPreferenceForm, OrderRequestForm, OTPVerificationForm, ProductQuestionForm, ReviewForm, SignUpForm, SupportTicketForm, UserProfileForm
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, MarketingPreference, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductQuestion, ProductVariant, ProductView, Review, SavedForLaterItem, Shipment, SupportTicket, UserProfile, WishlistItem
 from .payments.razorpay_links import PaymentLinkError, cancel_payment_link, create_payment_link, verify_payment_link_signature
 from .ratelimit import rate_limit
-from .services import build_order_tracking_steps, calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, restore_order_inventory, verified_purchaser_ids
+from .services import build_order_tracking_steps, calculate_cart_quote, customers_also_viewed, deduct_order_inventory, fail_or_cancel_payment, frequently_bought_together, mark_payment_captured, notify_order_email, payment_captured_message, payment_details, refund_message, release_expired_reservations_if_due, restore_order_inventory, run_daily_cleanup_if_due, verified_purchaser_ids
+from .services.lux import get_lux
 from django.contrib.auth import views as auth_views
+from django.contrib.auth.views import redirect_to_login
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +52,42 @@ def health_check(request):
     return HttpResponse("ok", status=200)
 
 
+ROBOTS_DISALLOW = (
+    "/cart/", "/checkout/", "/payment/", "/payments/", "/order/", "/orders/", "/account/", "/accounts/",
+    "/addresses/", "/wishlist/", "/saved-for-later/", "/notification-preferences/", "/support/",
+    "/signup/", "/verify-email/", "/password-reset/", "/chat/", "/dashboard/",
+)
+
+
+@require_GET
+def robots_txt(request):
+    # The admin path is deliberately not listed: robots.txt is public.
+    lines = ["User-agent: *", *(f"Disallow: {path}" for path in ROBOTS_DISALLOW),
+             f"Sitemap: {request.build_absolute_uri('/sitemap.xml')}"]
+    return HttpResponse("\n".join(lines) + "\n", content_type="text/plain")
+
+
+RESET_EMAILS_PER_ADDRESS_PER_HOUR = 3
+
+
+def _reset_email_allowed(email):
+    key = "ratelimit:password_reset_email:" + hashlib.sha256(email.strip().lower().encode()).hexdigest()
+    if cache.add(key, 1, timeout=3600):
+        return True
+    try:
+        return cache.incr(key) <= RESET_EMAILS_PER_ADDRESS_PER_HOUR
+    except ValueError:
+        cache.set(key, 1, timeout=3600)
+        return True
+
+
 class IKartPasswordResetView(auth_views.PasswordResetView):
     def form_valid(self, form):
         logger = logging.getLogger(__name__)
+        if not _reset_email_allowed(form.cleaned_data["email"]):
+            # Same response as a sent email, so this doesn't reveal which addresses exist.
+            logger.warning("Password reset email suppressed: per-address hourly limit reached.")
+            return redirect(self.get_success_url())
         if not settings.SITE_URL or not isinstance(settings.SITE_URL, str):
             logger.error(f"SITE_URL is not properly configured: {settings.SITE_URL}")
             messages.error(self.request, "Password reset is temporarily unavailable. Please try again later.")
@@ -82,6 +119,14 @@ class IKartPasswordResetView(auth_views.PasswordResetView):
         return redirect(self.get_success_url())
 
 
+def _card_products(queryset):
+    """Everything _product_card.html shows (image, approved-review count and rating) in fixed queries."""
+    approved = Q(reviews__is_approved=True)
+    return queryset.prefetch_related("images").annotate(
+        rating_value=Avg("reviews__rating", filter=approved), review_count=Count("reviews", filter=approved),
+    )
+
+
 def home(request):
     from storefront.models import HeroSection
     hero = HeroSection.objects.filter(is_active=True).first()
@@ -90,15 +135,13 @@ def home(request):
         hero, _ = HeroSection.objects.get_or_create(pk=1)
     return render(request, "storefront/home.html", {
         "hero": hero,
-        "featured": Product.objects.filter(is_active=True, is_featured=True)[:8],
+        "featured": _card_products(Product.objects.filter(is_active=True, is_featured=True))[:8],
         "categories": Category.objects.filter(parent__isnull=True)[:8],
     })
 
 
 def product_list(request, category_slug=None):
-    products = Product.objects.filter(is_active=True).select_related("category").prefetch_related("images").annotate(
-        rating_value=Avg("reviews__rating", filter=Q(reviews__is_approved=True)), review_count=Count("reviews", filter=Q(reviews__is_approved=True)),
-    )
+    products = _card_products(Product.objects.filter(is_active=True).select_related("category"))
     category = None
     if category_slug:
         category = get_object_or_404(Category, slug=category_slug)
@@ -150,6 +193,8 @@ def search_autocomplete(request):
 
 
 def product_detail(request, slug):
+    release_expired_reservations_if_due()
+    run_daily_cleanup_if_due()
     product = get_object_or_404(Product.objects.prefetch_related("images", "variants", "reviews__user"), slug=slug, is_active=True)
     if not request.session.session_key:
         request.session.create()
@@ -173,9 +218,16 @@ def product_detail(request, slug):
 
 @require_POST
 def add_to_cart(request, product_id):
+    release_expired_reservations_if_due()
     product = get_object_or_404(Product, id=product_id, is_active=True)
-    variant_id = request.POST.get("variant")
-    variant = product.variants.filter(id=variant_id).first() if variant_id else None
+    variant_id = request.POST.get("variant", "")
+    variant = product.variants.filter(id=variant_id).first() if variant_id.isdigit() else None
+    if variant_id and not variant:
+        messages.error(request, "That option is not available. Please choose another.")
+        return redirect(product.get_absolute_url())
+    if not variant and product.variants.exists():
+        messages.error(request, "Please choose a size or option before adding this to your cart.")
+        return redirect(product.get_absolute_url())
     available = variant.stock if variant else product.stock
     try:
         quantity = int(request.POST.get("quantity", 1))
@@ -192,10 +244,11 @@ def add_to_cart(request, product_id):
         return redirect(product.get_absolute_url())
     cart.add(product, quantity, variant)
     messages.success(request, f"{product.name} was added to your cart.")
-    return redirect(request.POST.get("next") or "storefront:cart")
+    return redirect(_safe_next(request) or "storefront:cart")
 
 
 def cart_detail(request):
+    release_expired_reservations_if_due()
     cart = Cart(request)
     removed_count = cart.prune_stale()
     if removed_count:
@@ -281,7 +334,7 @@ def remove_from_cart(request, key):
 
 @login_required
 def wishlist(request):
-    items = request.user.wishlist_items.select_related("product").prefetch_related("product__images")
+    items = request.user.wishlist_items.prefetch_related(Prefetch("product", queryset=_card_products(Product.objects.all())))
     return render(request, "storefront/wishlist.html", {"items": items})
 
 
@@ -296,7 +349,7 @@ def toggle_wishlist(request, product_id):
     else:
         WishlistItem.objects.create(user=request.user, product=product)
         messages.success(request, f"{product.name} was saved to your wishlist.")
-    return redirect(request.POST.get("next") or product.get_absolute_url())
+    return redirect(_safe_next(request) or product.get_absolute_url())
 
 
 @login_required
@@ -329,6 +382,9 @@ def saved_for_later(request):
 @require_POST
 def move_saved_item_to_cart(request, item_id):
     item = get_object_or_404(SavedForLaterItem, id=item_id, user=request.user)
+    if not item.variant and item.product.variants.exists():
+        messages.error(request, "Please choose a size or option for this item on its product page.")
+        return redirect(item.product.get_absolute_url())
     available = item.variant.stock if item.variant else item.product.stock
     if not available:
         messages.error(request, "This item is currently out of stock.")
@@ -414,6 +470,25 @@ def _can_access_order(request, order):
     return not is_expired
 
 
+def _online_checkout_finished(token):
+    """True once the online order started with this checkout token is no longer awaiting payment.
+
+    Razorpay orders are always completed outside the checkout request (return page,
+    webhook or reservation sweep), so a token still held after that is stale. COD
+    orders finish inside the checkout request, which already clears the token.
+    """
+    return Order.objects.filter(
+        checkout_token=token, payment_method=Order.PaymentMethod.RAZORPAY,
+    ).exclude(status=Order.Status.PAYMENT_PENDING).exists()
+
+
+def _finish_checkout_session(request, order):
+    """Empty this browser's cart once its online order is paid, however the payment was confirmed."""
+    if order.checkout_token and request.session.get("checkout_token") == str(order.checkout_token):
+        Cart(request).clear()
+        request.session.pop("checkout_token", None)
+
+
 def _razorpay_client():
     if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
         return None
@@ -456,19 +531,12 @@ def _create_order_from_cart(form, cart, quote, checkout_token, payment_pending=F
         return order
 
 
-@require_GET
-@rate_limit("check_email_registered", limit=20, period_seconds=300)
-def check_email_registered(request):
-    """Lets checkout warn a guest who types an email that already has an
-    account: otherwise their order is created with user=None and never
-    shows up in that account's order history."""
-    email = request.GET.get("email", "").strip().lower()
-    registered = bool(email) and User.objects.filter(email__iexact=email).exists()
-    return JsonResponse({"registered": registered})
-
-
 @rate_limit("checkout", limit=30, period_seconds=300)
 def checkout(request):
+    if not request.user.is_authenticated:
+        messages.info(request, "Please sign in or create an account to check out. Your cart is saved.")
+        return redirect_to_login(request.get_full_path())
+    release_expired_reservations_if_due()
     cart = Cart(request)
     removed_count = cart.prune_stale()
     if removed_count:
@@ -482,12 +550,19 @@ def checkout(request):
         messages.info(request, "Your cart is empty.")
         return redirect("storefront:product_list")
     session_token = request.session.get("checkout_token")
+    if session_token and _online_checkout_finished(session_token):
+        session_token = None
     checkout_token = session_token or _new_checkout_token(request)
     if request.method == "POST":
         form = CheckoutForm(request.POST, user=request.user)
         if form.is_valid():
             token = form.cleaned_data["checkout_token"]
-            if str(token) != request.session.get("checkout_token"):
+            if str(token) != str(checkout_token) and _online_checkout_finished(token):
+                # The page was opened before an earlier online order finished elsewhere.
+                token = checkout_token
+            if str(token) != str(checkout_token):
+                form.data = form.data.copy()
+                form.data["checkout_token"] = str(checkout_token)
                 form.add_error(None, "This checkout has expired. Please review your cart and try again.")
                 return render(request, "storefront/checkout.html", {"cart": cart, "form": form, "quote": calculate_cart_quote(cart, request.user, form.cleaned_data["delivery_option"], form.cleaned_data["coupon_code"])})
             existing_order = Order.objects.filter(checkout_token=token).first()
@@ -601,6 +676,7 @@ def razorpay_payment_link_callback(request, number):
         messages.error(request, "We could not verify this payment return. Please wait for the payment status update.")
         return redirect("storefront:order_confirmation", number=order.number)
     if payment.status == PaymentTransaction.Status.CAPTURED:
+        _finish_checkout_session(request, order)
         _remember_order(request, order.number)
         return redirect("storefront:order_confirmation", number=order.number)
     client = _razorpay_client()
@@ -635,7 +711,7 @@ def razorpay_payment_link_callback(request, number):
     Cart(request).clear()
     request.session.pop("checkout_token", None)
     _remember_order(request, order.number)
-    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", f"Your payment was successful. Total paid: ₹{order.total}")
+    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", payment_captured_message(order))
     return redirect("storefront:order_confirmation", number=order.number)
 
 
@@ -646,6 +722,7 @@ def verify_razorpay_payment(request, number):
         raise Http404
     payment = get_object_or_404(PaymentTransaction, order=order)
     if payment.status == PaymentTransaction.Status.CAPTURED:
+        _finish_checkout_session(request, order)
         return redirect("storefront:order_confirmation", number=order.number)
     provider_order_id = request.POST.get("razorpay_order_id", "")
     provider_payment_id = request.POST.get("razorpay_payment_id", "")
@@ -721,7 +798,7 @@ def verify_razorpay_payment(request, number):
     request.session.pop("checkout_token", None)
     _remember_order(request, order.number)
     if order.payment_status == "paid":
-        notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", f"Your payment was successful. Total paid: ₹{order.total}")
+        notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", payment_captured_message(order))
     else:
         notify_order_email(order, "payment_review", f"Payment received for order {order.number}", "Your payment was received and is being reviewed because the item is no longer available.")
     return redirect("storefront:order_confirmation", number=order.number)
@@ -862,7 +939,7 @@ def razorpay_webhook(request):
             }:
                 order = mark_payment_captured(payment, entity.get("id", ""), entity)
                 if order.payment_status == "paid":
-                    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", f"Your payment was successful. Total paid: ₹{order.total}")
+                    notify_order_email(order, "payment_captured", f"Order {order.number} confirmed", payment_captured_message(order))
                 else:
                     notify_order_email(order, "payment_review", f"Payment received for order {order.number}", "Your payment was received and is being reviewed before fulfilment.")
         elif event == "payment.failed" and payment.status in {PaymentTransaction.Status.CREATED, PaymentTransaction.Status.AUTHORIZED}:
@@ -885,7 +962,7 @@ def razorpay_webhook(request):
                 payment.order.save(update_fields=["payment_status", "updated_at"])
         elif event == "refund.processed":
             order = _apply_refund_webhook(payment, refund_entity, succeeded=True)
-            notify_order_email(order, "refund_processed", f"Order {order.number}: refund processed", "Your refund has been processed by the payment provider.")
+            notify_order_email(order, "refund_processed", f"Order {order.number}: refund processed", refund_message(order))
         elif event == "refund.failed":
             order = _apply_refund_webhook(payment, refund_entity, succeeded=False)
             notify_order_email(order, "refund_failed", f"Order {order.number}: refund needs attention", "Your refund could not be processed yet. Our support team will contact you.")
@@ -909,6 +986,7 @@ def order_confirmation(request, number):
         "shipment": getattr(order, "shipment", None),
         "requests": order.requests.all(),
         "tracking_steps": build_order_tracking_steps(order),
+        "payment_info": payment_details(order),
     })
 
 
@@ -941,12 +1019,15 @@ def request_order_change(request, number, request_type):
     if request_type == OrderRequest.RequestType.CANCELLATION and order.status not in {Order.Status.PLACED, Order.Status.CANCELLATION_REQUESTED}:
         messages.error(request, "This order can no longer be cancelled online.")
         return redirect("storefront:order_confirmation", number=order.number)
-    if request_type == OrderRequest.RequestType.RETURN and order.status not in {Order.Status.DELIVERED, Order.Status.RETURN_REQUESTED}:
-        messages.error(request, "A return can be requested after delivery.")
-        return redirect("storefront:order_confirmation", number=order.number)
     existing = order.requests.filter(request_type=request_type, status=OrderRequest.Status.REQUESTED).first()
     if existing:
         messages.info(request, "You already have a request in progress for this order.")
+        return redirect("storefront:order_confirmation", number=order.number)
+    if request_type == OrderRequest.RequestType.RETURN and not order.can_request_return:
+        if order.status == Order.Status.DELIVERED and order.return_deadline:
+            messages.error(request, f"The {Order.RETURN_WINDOW_DAYS}-day return window for this order closed on {order.return_deadline:%d %b %Y}. Please contact support if you need help.")
+        else:
+            messages.error(request, "A return can be requested after delivery.")
         return redirect("storefront:order_confirmation", number=order.number)
     form = OrderRequestForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -977,16 +1058,25 @@ def signup(request):
             request.session["pending_registration"] = {
                 "username": form.cleaned_data["username"],
                 "email": form.cleaned_data["email"],
+                "phone": form.cleaned_data["phone"],
                 "password_hash": make_password(form.cleaned_data["password1"]),
                 "code_hash": code_hash,
                 "expires_at": expires_at.isoformat(),
                 "attempts": 0,
                 "last_sent_at": timezone.now().isoformat(),
+                "next": _safe_next(request),
             }
             return redirect("storefront:verify_email")
     else:
         form = SignUpForm()
-    return render(request, "registration/signup.html", {"form": form})
+    return render(request, "registration/signup.html", {"form": form, "next": _safe_next(request)})
+
+
+def _safe_next(request):
+    next_url = request.POST.get("next") or request.GET.get("next") or ""
+    if url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        return next_url
+    return ""
 
 
 def _send_verification_code(email):
@@ -1023,10 +1113,11 @@ def verify_email(request):
                     return redirect("storefront:login")
                 user = User(username=pending["username"], email=pending["email"], password=pending["password_hash"])
                 user.save()
+                UserProfile.objects.create(user=user, phone=pending.get("phone", ""))
                 request.session.pop("pending_registration", None)
                 login(request, user)
                 messages.success(request, "Your email has been verified. Welcome to IKart!")
-                return redirect("storefront:home")
+                return redirect(pending.get("next") or "storefront:home")
             else:
                 pending["attempts"] += 1
                 request.session["pending_registration"] = pending
@@ -1148,12 +1239,13 @@ def support_ticket(request, ticket_id):
 @login_required
 def account(request):
     profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    saved_phone = profile.phone
     form = UserProfileForm(request.POST or None, instance=profile)
     if request.method == "POST" and form.is_valid():
         form.save()
-        messages.success(request, "Your account details were updated.")
+        messages.success(request, f"Mobile number saved: {mobile_display(profile.phone)}")
         return redirect("storefront:account")
-    return render(request, "storefront/account.html", {"form": form})
+    return render(request, "storefront/account.html", {"form": form, "saved_phone": saved_phone})
 
 
 @login_required
@@ -1192,3 +1284,34 @@ def trust_page(request, page):
     if page not in pages:
         raise Http404
     return render(request, "storefront/trust_page.html", {"page": page})
+
+
+@require_POST
+@rate_limit("lux_chat", limit=20, period_seconds=60)
+def chat_message(request):
+    """Handle Lux chatbot messages via AJAX."""
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON in request body'}, status=400)
+
+    message = str(data.get('message', '')).strip()
+    session_id = str(data.get('session_id') or uuid4())
+    if not message:
+        return JsonResponse({'error': 'Message cannot be empty'}, status=400)
+
+    user_context = {"user": request.user}
+    if request.user.is_authenticated:
+        user_context["username"] = request.user.get_full_name() or request.user.username
+
+    try:
+        reply = get_lux().chat(message, session_id, user_context)
+    except Exception:
+        logger.exception("Lux chat failed")
+        return JsonResponse({'error': 'Lux is unavailable right now.'}, status=503)
+
+    return JsonResponse({
+        'reply': reply,
+        'session_id': session_id,
+        'suggestions': ['Track order', 'Returns', 'Size guide', 'Support'],
+    })

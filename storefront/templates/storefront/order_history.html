@@ -43,8 +43,8 @@
           <input type="hidden" name="next" value="{% url 'storefront:order_history' %}">
           {% with form=review_forms|dict_get:item.product_id %}
           <div class="ik-field mb-3"><label for="{{ form.rating.id_for_label }}">Rating</label>{{ form.rating }}</div>
-          <div class="ik-field mb-3"><label for="{{ form.title.id_for_label }}">Title</label>{{ form.title }}{% for error in form.title.errors %}<p class="ik-error">{{ error }}</p>{% endfor %}</div>
-          <div class="ik-field mb-4"><label for="{{ form.body.id_for_label }}">Review</label>{{ form.body }}{% for error in form.body.errors %}<p class="ik-error">{{ error }}</p>{% endfor %}</div>
+          <div class="ik-field mb-3"><label for="{{ form.title.id_for_label }}">Title</label>{{ form.title }}{% if form.title.errors %}<p id="{{ form.title.id_for_label }}_error" class="ik-error">{{ form.title.errors|join:" " }}</p>{% endif %}</div>
+          <div class="ik-field mb-4"><label for="{{ form.body.id_for_label }}">Review</label>{{ form.body }}{% if form.body.errors %}<p id="{{ form.body.id_for_label }}_error" class="ik-error">{{ form.body.errors|join:" " }}</p>{% endif %}</div>
           {% endwith %}
           <button class="ik-btn ik-btn-primary ik-btn-sm">{% if item.product_id in existing_reviews %}Update review{% else %}Submit review{% endif %}</button>
         </form>

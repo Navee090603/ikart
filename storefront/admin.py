@@ -1,9 +1,13 @@
 import csv
+import ipaddress
 import logging
+import socket
 from decimal import Decimal, InvalidOperation
-from io import TextIOWrapper
+from io import BytesIO, TextIOWrapper
+from urllib.parse import urljoin, urlparse
 
 import requests
+from PIL import Image
 from django import forms
 from django.core.files.base import ContentFile
 
@@ -19,7 +23,7 @@ from .forms import CategoryCSVUploadForm
 from django.core.mail import send_mail
 
 from .models import Address, Category, Coupon, CouponRedemption, FAQ, HeroSection, MarketingPreference, NotificationLog, Order, OrderItem, OrderRequest, PaymentTransaction, PaymentWebhookEvent, Product, ProductImage, ProductQuestion, ProductVariant, Review, SavedForLaterItem, Shipment, ShipmentEvent, SupportTicket, SupportTicketReply, UserProfile, WishlistItem
-from .services import fail_or_cancel_payment, notify_order_email, refund_captured_payment, restore_order_inventory
+from .services import fail_or_cancel_payment, notify_order_email, refund_captured_payment, refund_message, release_coupon_redemption, restore_order_inventory
 
 logger = logging.getLogger(__name__)
 
@@ -368,7 +372,8 @@ class ProductAdmin(admin.ModelAdmin):
                             self.message_user(
                                 request,
                                 f"Successfully imported {imported_count} of {len(rows)} product(s)."
-                                + (f" {len(errors)} issue(s) reported below." if errors else ""),
+                                # The redirect drops the form, so the issues must travel in the message.
+                                + (f" {len(errors)} issue(s): " + " | ".join(errors[:5]) if errors else ""),
                                 messages.SUCCESS if not errors else messages.WARNING
                             )
 
@@ -454,8 +459,7 @@ class ProductAdmin(admin.ModelAdmin):
 
         if row["images"]:
 
-            ProductImage.objects.filter(product=product).delete()
-
+            downloaded = []
             image_list = row["images"].split("|")
 
             for index, image_url in enumerate(image_list):
@@ -481,6 +485,12 @@ class ProductAdmin(admin.ModelAdmin):
                     )
                     continue
 
+                downloaded.append((index, filename, content))
+
+            # Keep the existing photos unless at least one replacement actually downloaded.
+            if downloaded:
+                ProductImage.objects.filter(product=product).delete()
+            for index, filename, content in downloaded:
                 image = ProductImage(
                     product=product,
                     alt_text=product.name,
@@ -550,9 +560,31 @@ class ProductAdmin(admin.ModelAdmin):
                     continue
 
     @staticmethod
-    def _fetch_image(image_url, timeout=10, max_bytes=10 * 1024 * 1024):
+    def _check_public_url(url):
+        """Refuse URLs that resolve to loopback, private, link-local or other non-public addresses."""
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError("Image URL must be an http:// or https:// address.")
+        try:
+            addresses = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), proto=socket.IPPROTO_TCP)
+        except OSError as exc:
+            raise ValueError(f"Could not resolve {parsed.hostname}.") from exc
+        for address in addresses:
+            if not ipaddress.ip_address(address[4][0]).is_global:
+                raise ValueError("Image URL points to an internal network address, which is not allowed.")
+
+    @classmethod
+    def _fetch_image(cls, image_url, timeout=10, max_bytes=10 * 1024 * 1024, max_redirects=3):
         """Download a remote image and return (filename, ContentFile) ready for an ImageField."""
-        response = requests.get(image_url, timeout=timeout, stream=True)
+        url = image_url
+        for _ in range(max_redirects + 1):
+            cls._check_public_url(url)  # checked on every hop, so a redirect can't reach an internal host
+            response = requests.get(url, timeout=timeout, stream=True, allow_redirects=False)
+            if not response.is_redirect:
+                break
+            url = urljoin(url, response.headers.get("Location", ""))
+        else:
+            raise ValueError("Image URL redirects too many times.")
         response.raise_for_status()
 
         content_length = response.headers.get("Content-Length")
@@ -563,11 +595,16 @@ class ProductAdmin(admin.ModelAdmin):
         if len(data) > max_bytes:
             raise ValueError("Image exceeds maximum allowed size")
 
+        try:
+            with Image.open(BytesIO(data)) as picture:
+                picture.verify()
+                image_format = (picture.format or "jpeg").lower()
+        except Exception as exc:
+            raise ValueError("The downloaded file is not a valid image.") from exc
+
         filename = image_url.rstrip("/").split("/")[-1].split("?")[0] or "image"
         if "." not in filename:
-            content_type = response.headers.get("Content-Type", "")
-            ext = content_type.split("/")[-1].split(";")[0] if "/" in content_type else "jpg"
-            filename = f"{filename}.{ext}"
+            filename = f"{filename}.{'jpg' if image_format == 'jpeg' else image_format}"
 
         return filename, ContentFile(data)
 
@@ -592,18 +629,52 @@ class OrderRequestInline(admin.TabularInline):
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = ("number", "full_name", "total", "discount_amount", "payment_method", "payment_status", "status", "created_at")
-    list_filter = ("status", "payment_method", "created_at")
+    list_filter = ("status", "payment_method", "payment_status", "created_at")
     search_fields = ("number", "full_name", "email")
     readonly_fields = ("number", "subtotal", "delivery_fee", "total")
     inlines = [OrderItemInline, ShipmentInline, OrderRequestInline]
 
     def save_model(self, request, obj, form, change):
         previous_status = Order.objects.get(pk=obj.pk).status if change else None
+        status_changed = change and previous_status != obj.status
+        closing = obj.status in {Order.Status.CANCELLED, Order.Status.REFUNDED}
+        if status_changed and closing and not self._refund_before_closing(request, obj):
+            obj.status = previous_status
+            status_changed = False
         super().save_model(request, obj, form, change)
-        if change and obj.status in {Order.Status.CANCELLED, Order.Status.REFUNDED} and previous_status != obj.status:
+        if status_changed and closing:
             restore_order_inventory(obj)
-        if change and previous_status != obj.status:
+        if status_changed and obj.status == Order.Status.CANCELLED:
+            release_coupon_redemption(obj)
+        if status_changed:
             notify_order_email(obj, "order_status", f"Order {obj.number} is {obj.get_status_display()}", f"Your order status is now: {obj.get_status_display()}.")
+
+    def _refund_before_closing(self, request, order):
+        """Refund a captured online payment before an order is cancelled or refunded.
+
+        Returns False (keep the old status) if the refund could not be started.
+        """
+        if order.payment_method != Order.PaymentMethod.RAZORPAY:
+            if order.status == Order.Status.CANCELLED and order.payment_status == "pending":
+                order.payment_status = "cancelled"
+            return True
+        payment = PaymentTransaction.objects.filter(order=order).first()
+        if not payment or payment.status != PaymentTransaction.Status.CAPTURED:
+            return True
+        try:
+            payment = refund_captured_payment(order)
+        except Exception as error:
+            logger.exception("Razorpay refund failed to start for order %s", order.number)
+            reason = str(error) if isinstance(error, ValueError) else "Razorpay did not accept the refund"
+            self.message_user(request, f"Status not changed: {reason}. The customer has not been refunded; try again shortly.", messages.ERROR)
+            return False
+        if payment.status == PaymentTransaction.Status.REFUND_PENDING:
+            order.payment_status = "refund_pending"
+            self.message_user(request, f"Refund of ₹{payment.amount} started with Razorpay. It will show as refunded once Razorpay confirms it.", messages.INFO)
+        else:
+            order.payment_status = "refunded"
+            self.message_user(request, f"₹{payment.amount} refunded to the customer through Razorpay.", messages.INFO)
+        return True
 
 
 class ShipmentEventInline(admin.TabularInline):
@@ -696,13 +767,26 @@ class OrderRequestAdmin(admin.ModelAdmin):
             if obj.request_type == OrderRequest.RequestType.CANCELLATION:
                 order.status = Order.Status.CANCELLED
                 restore_order_inventory(order)
+                release_coupon_redemption(order)
             order.payment_status = "refund_pending"
             order.save(update_fields=["status", "payment_status", "updated_at"])
-            notify_order_email(order, "refund_pending", f"Order {order.number}: refund initiated", "Your refund has been initiated and is awaiting confirmation from the payment provider.")
+            notify_order_email(order, "refund_pending", f"Order {order.number}: refund initiated", refund_message(order))
+            return
+        elif obj.status == OrderRequest.Status.REJECTED and previous_status != obj.status:
+            restored_status = {
+                (OrderRequest.RequestType.CANCELLATION, Order.Status.CANCELLATION_REQUESTED): Order.Status.PLACED,
+                (OrderRequest.RequestType.RETURN, Order.Status.RETURN_REQUESTED): Order.Status.DELIVERED,
+            }.get((obj.request_type, order.status))
+            if restored_status:
+                order.status = restored_status
+                order.save(update_fields=["status", "updated_at"])
+            notify_order_email(order, "request_updated", f"Order {order.number}: {obj.get_status_display()}", f"Your {obj.get_request_type_display().lower()} request was not approved. Please contact support if you have questions.")
             return
         else:
             return
         restore_order_inventory(order)
+        if order.status == Order.Status.CANCELLED:
+            release_coupon_redemption(order)
         order.save(update_fields=["status", "payment_status", "updated_at"])
         notify_order_email(order, "request_updated", f"Order {order.number}: {obj.get_status_display()}", f"Your {obj.get_request_type_display().lower()} request is now {obj.get_status_display().lower()}.")
 

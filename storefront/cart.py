@@ -51,12 +51,18 @@ class Cart:
     def __iter__(self):
         products = Product.objects.filter(is_active=True).in_bulk(item["product_id"] for item in self.data.values())
         variants = ProductVariant.objects.in_bulk([item["variant_id"] for item in self.data.values() if item["variant_id"]])
+        products_with_options = set(
+            ProductVariant.objects.filter(product_id__in=products).values_list("product_id", flat=True)
+        )
         for key, item in self.data.items():
             product = products.get(item["product_id"])
             if not product:
                 continue
             variant = variants.get(item["variant_id"])
             if item["variant_id"] and (not variant or variant.product_id != product.id):
+                continue
+            if not item["variant_id"] and product.id in products_with_options:
+                # A size/option is required but missing, so the item can't be fulfilled.
                 continue
             price = product.price + (variant.price_adjustment if variant else Decimal("0"))
             yield {"key": key, "product": product, "variant": variant, "quantity": item["quantity"], "price": price, "total": price * item["quantity"]}

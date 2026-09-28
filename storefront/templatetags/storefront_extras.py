@@ -1,3 +1,5 @@
+import json
+
 from django import template
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
@@ -8,6 +10,15 @@ register = template.Library()
 @register.filter
 def dict_get(mapping, key):
     return mapping.get(key)
+
+
+@register.filter
+def mobile_display(value):
+    """+919361995937 (or a bare 10-digit number) -> "+91 93619 95937"."""
+    digits = (value or "").removeprefix("+91")
+    if len(digits) == 10 and digits.isdigit():
+        return f"+91 {digits[:5]} {digits[5:]}"
+    return value
 
 
 # IKart design-system icons: 24px outline set, 2px round stroke, drawn in currentColor.
@@ -68,3 +79,40 @@ def ikart_logo(size=32, wordmark=True):
     if not wordmark:
         return mark
     return format_html('{}<span class="ik-logo-word"><span class="ik-logo-i">I</span>Kart</span>', mark)
+
+
+# Same escaping as Django's json_script, so product text can never close the <script>.
+_JSON_SCRIPT_ESCAPES = {ord(">"): "\\u003E", ord("<"): "\\u003C", ord("&"): "\\u0026"}
+
+
+@register.simple_tag(takes_context=True)
+def product_json_ld(context):
+    """schema.org Product data for search results (price, stock, rating)."""
+    request, product = context["request"], context["product"]
+    variants = list(product.variants.all())
+    in_stock = any(v.stock > 0 for v in variants) if variants else product.stock > 0
+    data = {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": product.name,
+        "description": product.short_description,
+        "image": [request.build_absolute_uri(image.image.url) for image in product.images.all()],
+        "offers": {
+            "@type": "Offer",
+            "url": request.build_absolute_uri(product.get_absolute_url()),
+            "price": f"{product.price:.2f}",
+            "priceCurrency": "INR",
+            "availability": "https://schema.org/InStock" if in_stock else "https://schema.org/OutOfStock",
+        },
+    }
+    if product.brand:
+        data["brand"] = {"@type": "Brand", "name": product.brand}
+    reviews = context.get("reviews") or []
+    if reviews:
+        data["aggregateRating"] = {
+            "@type": "AggregateRating",
+            "ratingValue": round(sum(r.rating for r in reviews) / len(reviews), 1),
+            "reviewCount": len(reviews),
+        }
+    payload = json.dumps(data, ensure_ascii=False).translate(_JSON_SCRIPT_ESCAPES)
+    return format_html('<script type="application/ld+json">{}</script>', mark_safe(payload))
