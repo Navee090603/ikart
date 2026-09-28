@@ -1746,3 +1746,24 @@ class WebhookErrorLoggingTests(TestCase):
             )
         self.assertEqual(response.status_code, 400)
         self.assertTrue(any("invalid signature" in message.lower() for message in logs.output))
+
+
+class ConfigurationDocsTests(TestCase):
+    def test_tax_rate_is_a_percentage(self):
+        from types import SimpleNamespace
+        from .services import calculate_cart_quote
+        with override_settings(TAX_RATE=Decimal("18")):
+            quote = calculate_cart_quote(SimpleNamespace(subtotal=Decimal("100.00")))
+        self.assertEqual(quote.tax_amount, Decimal("18.00"))
+        self.assertEqual(quote.total, Decimal("118.00"))
+
+    def test_documented_environment_variables_are_read_by_settings(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        settings_source = (root / "ikart/settings.py").read_text()
+        env_example = re.findall(r"^#?\s*([A-Z][A-Z0-9_]+)=", (root / ".env.example").read_text(), re.M)
+        render_keys = re.findall(r"- key: ([A-Z0-9_]+)", (root / "render.yaml").read_text())
+        self.assertIn("GROQ_API_KEY", render_keys)
+        self.assertIn("AI_PROVIDER", render_keys)
+        for name in set(env_example) | set(render_keys):
+            self.assertIn(f'"{name}"', settings_source, f"{name} is documented but settings.py never reads it")

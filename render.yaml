@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: ikart
+    name: ikart-sg
     env: python
     plan: free
     buildCommand: ./build.sh
@@ -32,4 +32,8 @@ services:
       - key: BREVO_API_KEY
         sync: false
       - key: DEFAULT_FROM_EMAIL
+        sync: false
+      - key: AI_PROVIDER
+        sync: false
+      - key: GROQ_API_KEY
         sync: false
