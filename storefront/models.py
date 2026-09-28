@@ -93,6 +93,14 @@ class Product(models.Model):
         return 0
 
     @property
+    def available_stock(self):
+        """What a shopper can buy: orders deduct from variants when a product has them."""
+        variants = self.variants.all()
+        if variants:
+            return sum(variant.stock for variant in variants)
+        return self.stock
+
+    @property
     def is_low_stock(self):
         return self.stock <= self.low_stock_threshold
 
