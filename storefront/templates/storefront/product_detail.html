@@ -46,8 +46,8 @@
           <h1 id="product-title" class="ik-h1">{{ product.name }}</h1>
           <div class="flex flex-wrap items-center gap-3">
             <p class="ik-rating"><span class="ik-star" aria-hidden="true">★</span><b>{{ product.average_rating }}</b><span>· {{ product.reviews.count }} review{{ product.reviews.count|pluralize }}</span><span class="ik-sr"> out of 5</span></p>
-            {% if product.stock %}
-            <span class="ik-badge ik-badge-success">In stock · {{ product.stock }} available</span>
+            {% if product.available_stock %}
+            <span class="ik-badge ik-badge-success">In stock · {{ product.available_stock }} available</span>
             {% else %}
             <span class="ik-badge">Out of stock</span>
             {% endif %}
@@ -107,8 +107,8 @@
               <label for="qty">Quantity</label>
               <input id="qty" type="number" name="quantity" min="1" value="1" class="ik-qty-input">
             </div>
-            <button class="ik-btn ik-btn-primary ik-btn-lg flex-1 min-w-[200px]" {% if not product.stock %}disabled{% endif %}>
-              {% icon 'cart' %}{% if product.stock %}Add to cart{% else %}Out of stock{% endif %}
+            <button class="ik-btn ik-btn-primary ik-btn-lg flex-1 min-w-[200px]" {% if not product.available_stock %}disabled{% endif %}>
+              {% icon 'cart' %}{% if product.available_stock %}Add to cart{% else %}Out of stock{% endif %}
             </button>
           </div>
         </form>

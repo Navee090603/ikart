@@ -782,6 +782,28 @@ class ShoppingFlowTests(TestCase):
         self.client.post(reverse("storefront:add_to_cart", args=[dress.id]), {"quantity": 1, "variant": small.id})
         self.assertEqual(list(self.client.session["cart"]), [f"{dress.id}:{small.id}"])
 
+    def test_product_page_stock_comes_from_variants_when_product_has_them(self):
+        from .models import ProductVariant
+        dress, small = self.sized_product()  # Product.stock=10, S=3
+        ProductVariant.objects.create(product=dress, size="M", sku="DRESS-M", stock=4)
+        page = self.client.get(dress.get_absolute_url())
+        self.assertContains(page, "In stock · 7 available")
+        self.assertNotContains(page, "Out of stock")
+
+        ProductVariant.objects.filter(product=dress).update(stock=0)
+        page = self.client.get(dress.get_absolute_url())
+        self.assertContains(page, "Out of stock")
+        self.assertNotContains(page, "In stock ·")
+        self.assertRegex(page.content.decode(), r"<button[^>]*ik-btn-primary[^>]*disabled")
+
+    def test_product_page_stock_without_variants_uses_product_stock(self):
+        page = self.client.get(self.product.get_absolute_url())
+        self.assertContains(page, "In stock · 5 available")
+        self.product.stock = 0
+        self.product.save(update_fields=["stock"])
+        page = self.client.get(self.product.get_absolute_url())
+        self.assertContains(page, "Out of stock")
+
     def test_invalid_or_foreign_option_is_rejected(self):
         from .models import ProductVariant
         dress, small = self.sized_product()
